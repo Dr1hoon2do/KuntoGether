@@ -1,10 +1,8 @@
-// KuntoGame init.js가 엔진을 불러온 뒤 실행되는 TV(호스트) 게임 시작점
-(async function () {
+// TV(호스트) 게임 시작점. tv.html에서 kuntogame.js와 게임 스크립트를 불러온 뒤 실행된다.
+(function () {
   Config.uiScaleMode = "fit";
   Config.pixelPerfect = false;
   Config.debug = new URLSearchParams(location.search).has("debug");
-  Load.basePath = "assets/game/";
-  await Load.Scripts(["Shapes.js", "Ship.js", "Bullet.js", "Enemy.js", "Game.js"]);
 
   const App = new Engine({ canvas: "#game", clearColor: "#05070a", pixelRatio: Math.min(2, window.devicePixelRatio || 1) });
   const go = App.create("game");
