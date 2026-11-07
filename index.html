@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>PeerJS 연결 테스트</title>
+<style>
+  body{margin:0;font-family:sans-serif;background:#111;color:#eee;padding:16px}
+  button{font-size:18px;padding:14px 20px;margin:6px 0;width:100%;border:0;border-radius:8px;background:#3a7;color:#fff}
+  input{font-size:18px;padding:12px;width:100%;box-sizing:border-box;border-radius:8px;border:0;margin:6px 0}
+  #pad{height:220px;background:#234;border-radius:12px;margin:12px 0;touch-action:none;display:flex;align-items:center;justify-content:center;color:#789}
+  pre{background:#000;padding:8px;border-radius:8px;white-space:pre-wrap;word-break:break-all;font-size:13px;max-height:200px;overflow:auto}
+  .big{font-size:40px;letter-spacing:4px;text-align:center;background:#000;padding:10px;border-radius:8px}
+  .hide{display:none}
+</style>
+</head>
+<body>
+<h3>PeerJS 연결 테스트</h3>
+
+<div id="menu">
+  <button id="btnHost">호스트 시작 (TV 역할)</button>
+  <input id="joinId" placeholder="호스트 ID 입력">
+  <button id="btnJoin" style="background:#47a">컨트롤러로 접속</button>
+</div>
+
+<div id="host" class="hide">
+  <div>호스트 ID</div>
+  <div class="big" id="hostId">...</div>
+  <div style="margin:8px 0;font-size:13px">컨트롤러 링크:<br><span id="link"></span></div>
+  <div>접속자: <b id="count">0</b>명</div>
+  <pre id="hostLog"></pre>
+</div>
+
+<div id="ctrl" class="hide">
+  <div>상태: <b id="state">연결 중...</b> / 핑: <b id="ping">-</b> ms</div>
+  <div id="pad">여기를 터치/드래그</div>
+  <pre id="ctrlLog"></pre>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const log = (el, s) => { el.textContent = (new Date().toLocaleTimeString() + " " + s + "\n" + el.textContent).slice(0, 3000); };
+
+// ---------- 호스트 (TV 역할) ----------
+function startHost() {
+  $("menu").classList.add("hide"); $("host").classList.remove("hide");
+  const peer = new Peer();
+  const conns = new Map();
+  peer.on("open", id => {
+    $("hostId").textContent = id;
+    const url = location.href.split("?")[0] + "?join=" + id;
+    $("link").textContent = url;
+    log($("hostLog"), "호스트 준비됨");
+  });
+  peer.on("error", e => log($("hostLog"), "에러: " + e.type));
+  peer.on("connection", c => {
+    c.on("open", () => {
+      conns.set(c.peer, c); $("count").textContent = conns.size;
+      log($("hostLog"), "접속: " + c.peer.slice(0, 6));
+      c.send({ type: "welcome", n: conns.size });
+    });
+    c.on("data", d => {
+      if (d.type === "ping") c.send({ type: "pong", t: d.t });
+      else log($("hostLog"), c.peer.slice(0, 6) + " " + JSON.stringify(d));
+    });
+    c.on("close", () => { conns.delete(c.peer); $("count").textContent = conns.size; log($("hostLog"), "퇴장"); });
+  });
+}
+
+// ---------- 컨트롤러 ----------
+function startCtrl(hostId) {
+  $("menu").classList.add("hide"); $("ctrl").classList.remove("hide");
+  const peer = new Peer();
+  peer.on("error", e => { $("state").textContent = "에러: " + e.type; });
+  peer.on("open", () => {
+    const c = peer.connect(hostId, { reliable: false });
+    c.on("open", () => {
+      $("state").textContent = "연결됨";
+      setInterval(() => c.send({ type: "ping", t: performance.now() }), 1000);
+      const pad = $("pad");
+      const send = e => {
+        const r = pad.getBoundingClientRect();
+        c.send({ type: "move", x: +((e.clientX - r.left) / r.width).toFixed(2), y: +((e.clientY - r.top) / r.height).toFixed(2) });
+      };
+      pad.addEventListener("pointerdown", e => { pad.setPointerCapture(e.pointerId); c.send({ type: "down" }); send(e); });
+      pad.addEventListener("pointermove", e => { if (e.buttons || e.pressure) send(e); });
+      pad.addEventListener("pointerup", () => c.send({ type: "up" }));
+    });
+    c.on("data", d => {
+      if (d.type === "pong") $("ping").textContent = Math.round(performance.now() - d.t);
+      else log($("ctrlLog"), JSON.stringify(d));
+    });
+    c.on("close", () => { $("state").textContent = "끊김"; });
+  });
+}
+
+$("btnHost").onclick = startHost;
+$("btnJoin").onclick = () => startCtrl($("joinId").value.trim());
+const q = new URLSearchParams(location.search).get("join");
+if (q) startCtrl(q);
+</script>
+</body>
+</html>
