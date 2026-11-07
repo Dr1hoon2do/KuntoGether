@@ -75,7 +75,7 @@ else {
   peer.on("open", () => {
     clearTimeout(serverTimer);
     msg("2/3 TV를 찾는 중...");
-    const c = peer.connect(codeToPeerId(code), { reliable: true });
+    const c = peer.connect(codeToPeerId(code), { reliable: true, serialization: "json" }) // iOS Safari는 binary 직렬화(기본값)에서 문제가 있어 json 사용;
     const rtcTimer = setTimeout(() => fail("TV와 직접 연결하지 못했어요.\n(서로 다른 네트워크이면 막힐 수 있어요 — 같은 와이파이로 시도)"), 15000);
     c.on("error", e => msg("연결 에러: " + (e.type || e)));
     let timer = 0, last = "";
