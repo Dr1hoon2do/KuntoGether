@@ -19,12 +19,12 @@
 
 <div id="menu">
   <button id="btnHost">호스트 시작 (TV 역할)</button>
-  <input id="joinId" placeholder="호스트 ID 입력">
+  <input id="joinId" placeholder="방 코드 5글자 입력" maxlength="8" autocapitalize="characters" autocomplete="off">
   <button id="btnJoin" style="background:#47a">컨트롤러로 접속</button>
 </div>
 
 <div id="host" class="hide">
-  <div>호스트 ID</div>
+  <div>방 코드</div>
   <div class="big" id="hostId">...</div>
   <div style="margin:8px 0;font-size:13px">컨트롤러 링크:<br><span id="link"></span></div>
   <div>접속자: <b id="count">0</b>명</div>
@@ -42,19 +42,35 @@
 const $ = id => document.getElementById(id);
 const log = (el, s) => { el.textContent = (new Date().toLocaleTimeString() + " " + s + "\n" + el.textContent).slice(0, 3000); };
 
+// ---------- 짧은 방 코드 ----------
+// PeerJS 기본 ID(UUID 36자) 대신 5글자 코드를 ID로 직접 지정한다.
+// 헷갈리는 글자(0/O, 1/I/L)는 제외. 31^5 ≈ 2,800만 가지.
+const ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+const CODE_LEN = 5, PREFIX = "kuntogether-"; // 공용 PeerJS 서버에서 다른 앱과 겹치지 않게 접두어 사용
+const makeCode = () => Array.from(crypto.getRandomValues(new Uint8Array(CODE_LEN)), b => ALPHABET[b % ALPHABET.length]).join("");
+const normalizeCode = s => s.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/O/g, "").slice(0, CODE_LEN);
+const codeToPeerId = code => PREFIX + code;
+
 // ---------- 호스트 (TV 역할) ----------
 function startHost() {
   $("menu").classList.add("hide"); $("host").classList.remove("hide");
-  const peer = new Peer();
   const conns = new Map();
-  peer.on("open", id => {
-    $("hostId").textContent = id;
-    const url = location.href.split("?")[0] + "?join=" + id;
-    $("link").textContent = url;
-    log($("hostLog"), "호스트 준비됨");
-  });
-  peer.on("error", e => log($("hostLog"), "에러: " + e.type));
-  peer.on("connection", c => {
+  let peer;
+  const open = () => {
+    const code = makeCode();
+    peer = new Peer(codeToPeerId(code));
+    peer.on("open", () => {
+      $("hostId").textContent = code;
+      $("link").textContent = location.href.split("?")[0] + "?join=" + code;
+      log($("hostLog"), "호스트 준비됨");
+    });
+    peer.on("error", e => {
+      if (e.type === "unavailable-id") { peer.destroy(); open(); } // 코드 중복 → 새 코드로 재시도
+      else log($("hostLog"), "에러: " + e.type);
+    });
+    peer.on("connection", onConn);
+  };
+  const onConn = c => {
     c.on("open", () => {
       conns.set(c.peer, c); $("count").textContent = conns.size;
       log($("hostLog"), "접속: " + c.peer.slice(0, 6));
@@ -65,11 +81,13 @@ function startHost() {
       else log($("hostLog"), c.peer.slice(0, 6) + " " + JSON.stringify(d));
     });
     c.on("close", () => { conns.delete(c.peer); $("count").textContent = conns.size; log($("hostLog"), "퇴장"); });
-  });
+  };
+  open();
 }
 
 // ---------- 컨트롤러 ----------
-function startCtrl(hostId) {
+function startCtrl(input) {
+  const hostId = codeToPeerId(normalizeCode(input));
   $("menu").classList.add("hide"); $("ctrl").classList.remove("hide");
   const peer = new Peer();
   peer.on("error", e => { $("state").textContent = "에러: " + e.type; });
