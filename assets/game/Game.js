@@ -3,7 +3,7 @@ class Game extends Component {
   constructor(App) {
     super();
     this.App = App; this.cam = App.camera;
-    this.heroes = []; this.enemies = []; this.projs = []; this.pickups = []; this.conns = new Map();
+    this.heroes = []; this.roster = new Map(); this.enemies = []; this.projs = []; this.pickups = []; this.conns = new Map();
     this.floorNum = 1; this.map = null; this.cur = null; this.state = "explore"; // explore | fight | over | victory
     this.nextId = 0; this.overTimer = 0; this.introTimer = 0; this.introText = "";
     this.doorHold = 0; this.stairsHold = 0; this.stairsGO = null; this.toastText = ""; this.toastT = 0;
@@ -16,14 +16,16 @@ class Game extends Component {
     this._buildHud();
     Events.on("enemy.killed", e => {
       this.cam.shake(e.enemy.boss ? 6 : 0.8, e.enemy.boss ? 0.6 : 0.08);
-      const by = e.by; if (by && by.stats.lifesteal && Math.random() < by.stats.lifesteal) by.heal(1);
+      const by = e.by; if (!by || !by.stats) return;
+      if (by.stats.lifesteal && Math.random() < by.stats.lifesteal) by.heal(1);
+      if (!e.enemy.boss && Math.random() < 0.02 + by.stats.heartDrop) { const q = e.enemy.transform.position; this.spawnHeart(q.x, q.y); }
     }, { owner: this });
     this.startRun();
   }
 
   // ---------- 생성 도우미 ----------
   spawnSlash(hero, dir, w) {
-    const go = this.App.create("slash"), p = hero.transform.position, color = TIERS[hero.weapon.tier].color;
+    const go = this.App.create("slash"), p = hero.transform.position, color = w.color || TIERS[hero.weapon.tier].color;
     go.transform.setPosition(p.x, p.y); go.transform.rotation = dir;
     let t = 0; const dur = w.dur, half = (w.arc * Math.PI / 180) / 2;
     go.addComponent(new DrawRenderer(ctx => {
@@ -70,7 +72,7 @@ class Game extends Component {
 
   // ---------- 런·층·방 ----------
   startRun() {
-    for (const h of this.heroes) { h.resetRun(); h.alive = true; h.invuln = 0; }
+    for (const h of this.roster.values()) { h.resetRun(); h.alive = true; h.invuln = 0; }
     this.floorNum = 1; this.startFloor();
   }
   startFloor() {
@@ -94,7 +96,7 @@ class Game extends Component {
     this.heroes.forEach((h, i) => {
       const gap = Math.min(20, 150 / Math.max(1, n)), off = (i - (n - 1) / 2) * gap;
       const [x, y] = side === "S" ? [off, -hh + 24] : side === "N" ? [off, hh - 24] : side === "W" ? [-hw + 24, off] : [hw - 24, off];
-      h.transform.setPosition(x, y); h.invuln = Math.max(h.invuln, 1.2); h.swing = null; h.cd = 0; h.kx = h.ky = 0;
+      h.transform.setPosition(x, y); h.invuln = Math.max(h.invuln, 1.2 + h.stats.entryInvuln); h.swing = null; h.echoes = []; h.cd = 0; h.kx = h.ky = 0;
     });
     this.introTimer = 2.2; this.introText = `${this.floorNum}층 — ${ROOM_NAMES[room.type]}`;
     if (!room.spawned) { room.spawned = true; this._populate(room); }
@@ -155,7 +157,11 @@ class Game extends Component {
   clearRoom() {
     const room = this.cur, np = this._np(), f = this.floorNum;
     room.cleared = true; this.state = "explore";
-    for (const h of this.heroes) if (!h.alive) h.revive(3);
+    for (const h of this.heroes) { // 방 클리어 효과 (치유의 향로·저금통)
+      if (!h.alive) continue;
+      if (h.stats.roomHeal) h.heal(h.stats.roomHeal);
+      if (h.stats.roomGold) h.addGold(h.stats.roomGold);
+    }
     const rand = (a, b) => a + Math.random() * (b - a);
     if (room.type === "normal") {
       if (Math.random() < 0.55) this.spawnHeart(rand(-40, 40), rand(-20, 20));
@@ -166,12 +172,15 @@ class Game extends Component {
       for (let i = 0; i < 3; i++) this.spawnCoin(rand(-40, 40), rand(-40, 0), 3);
       this.spawnHeart(0, 30); this.toast("엘리트 격파! 보상이 나왔다", 2.5);
     } else if (room.type === "boss") {
+      const dead = this.heroes.filter(h => !h.alive); // 죽은 플레이어는 보스방을 클리어해야 부활한다
+      for (const h of dead) h.revive(Math.ceil(h.maxHp / 2));
+      if (dead.length) this.toast(`보스 격파! ${dead.map(h => h.nick).join(", ")} 부활`, 3);
       for (let i = 0; i < 4; i++) this.spawnCoin(rand(-50, 50), rand(-30, 0), 3 + f);
       this.spawnHeart(-45, 25); if (np >= 3) this.spawnHeart(45, 25);
       const n = Math.max(2, np), taken = this._heldItems(), pos = this._layout(n, -25);
       for (let i = 0; i < n; i++) { const id = randomItemId(taken); taken.add(id); this.spawnItemPickup(pos[i].x, pos[i].y, id); }
       if (f >= MAX_FLOOR) { this.state = "victory"; this.overTimer = 14; this.cam.shake(8, 1); this.toast("마왕을 쓰러뜨렸다!", 4); }
-      else { this._makeStairs(); this.toast("보스 격파! 아이템을 챙기고 계단으로", 3); }
+      else { this._makeStairs(); if (!dead.length) this.toast("보스 격파! 아이템을 챙기고 계단으로", 3); }
     }
   }
   _makeStairs() {
@@ -187,17 +196,42 @@ class Game extends Component {
   nextFloor() { this.floorNum++; this.startFloor(); }
 
   // ---------- 플레이어 ----------
-  addHero(keyboard = false) {
+  addHero(pid, nick) {
     const id = this.nextId++;
     const go = this.App.create("hero" + id);
     go.transform.setPosition((Math.random() - 0.5) * 40, -ARENA_H / 2 + 24);
-    const h = go.addComponent(new Hero(this, id)); h.setup(); h.keyboard = keyboard;
-    this.heroes.push(h);
+    const h = go.addComponent(new Hero(this, id, pid)); h.setup(); h.keyboard = pid === "kb";
+    if (nick) h.nick = nick;
+    this.heroes.push(h); this.roster.set(pid, h);
     return h;
   }
-  removeHero(h) { h.gameObject.destroy(); this.heroes = this.heroes.filter(x => x !== h); }
+  // 접속이 끊기면 캐릭터를 비활성화해 두고(아이템·골드·체력 그대로), 같은 pid가 돌아오면 되살린다
+  deactivateHero(h) {
+    h.conn = null; Object.assign(h.input, { mx: 0, my: 0, ax: 0, ay: 0, atk: 0, dash: 0 });
+    this.heroes = this.heroes.filter(x => x !== h); h.gameObject.setActive(false);
+  }
+  rejoinHero(h) {
+    if (this.heroes.includes(h)) return;
+    const hw = ARENA_W / 2, hh = ARENA_H / 2;
+    h.gameObject.setActive(true); h.transform.setPosition((Math.random() - 0.5) * 40, -hh + 24);
+    h.invuln = 2; h.swing = null; h.echoes = []; h.kx = h.ky = 0; this.heroes.push(h);
+  }
+  // 폰이 보낸 hello({pid, name})로 연결과 캐릭터를 묶는다
+  _bindHero(c, d) {
+    const pid = String(d.pid || "").slice(0, 48) || "anon-" + Math.random().toString(36).slice(2, 10);
+    const nick = Array.from(String(d.name || "").replace(/[\u0000-\u001f<>]/g, "").trim()).slice(0, 10).join("");
+    let h = this.roster.get(pid), rejoined = !!h;
+    if (h) {
+      if (h.conn && h.conn !== c) { const old = h.conn; h.conn = null; try { old.close(); } catch (e) {} } // 같은 기기가 다시 접속하면 이전 연결을 끊는다
+      this.rejoinHero(h);
+    } else h = this.addHero(pid);
+    if (nick) h.nick = nick; else if (!rejoined) h.nick = `P${h.id + 1}`;
+    h.conn = c; h.lastMsg = performance.now(); c._hero = h; this.conns.set(c, h);
+    c.send({ t: "welcome", id: h.id, color: h.color, name: h.nick, rejoined });
+    if (rejoined) this.toast(`${h.nick} 다시 접속`, 2);
+  }
   _keyboard() {
-    if (Input.getKeyDown("KeyK") && !this.heroes.some(h => h.keyboard)) this.addHero(true);
+    if (Input.getKeyDown("KeyK") && !this.roster.has("kb")) this.addHero("kb", "키보드");
     const h = this.heroes.find(x => x.keyboard); if (!h) return;
     const k = c => (Input.getKey(c) ? 1 : 0);
     Object.assign(h.input, { mx: k("KeyD") - k("KeyA"), my: k("KeyW") - k("KeyS"), atk: k("KeyJ") || k("Space"), dash: k("KeyL") || k("ShiftLeft") });
@@ -216,6 +250,8 @@ class Game extends Component {
       } else if (this.state === "explore") { this._updateDoors(dt); this._updateStairs(dt); }
       else { this.overTimer -= dt; if (this.overTimer <= 0) this.startRun(); } // over | victory
     }
+    const now = performance.now();
+    for (const h of this.heroes) if (h.conn && now - h.lastMsg > 600) Object.assign(h.input, { mx: 0, my: 0, ax: 0, ay: 0, atk: 0, dash: 0 });
     this._sendStatus(dt);
     this._updateHud();
   }
@@ -257,7 +293,7 @@ class Game extends Component {
     this.hudRoom.setText(this.roomCode ? `방 코드 ${this.roomCode}` : "");
     const boss = this.enemies.find(e => e.boss && !e.dead);
     this.hudBoss.setText(boss ? `☠ ${boss.title}  ${"█".repeat(Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${"░".repeat(20 - Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}` : "");
-    this.hudHeroes.setText(this.heroes.map(h => `P${h.id + 1} ${h.alive ? "♥".repeat(h.hp) + "♡".repeat(h.maxHp - h.hp) : "💀"} ${weaponLabel(h.weapon)} ${h.gold}G ★${h.items.length}`).join("    "));
+    this.hudHeroes.setText(this.heroes.map(h => `${h.nick} ${h.alive ? "♥".repeat(h.hp) + "♡".repeat(h.maxHp - h.hp) : "💀"} ${weaponLabel(h.weapon)} ${h.gold}G ★${h.items.length}`).join("    "));
     this.hudToast.setText(this.toastT > 0 ? this.toastText : "");
     let c = "";
     if (!this.heroes.length) c = this.roomCode ? `폰으로 접속하세요\n방 코드: ${this.roomCode}\n(키보드: K — WASD 이동, J 공격, L 대시)` : "서버 연결 중...";
@@ -284,21 +320,18 @@ class Game extends Component {
     open();
   }
   _onConn(c) {
-    c.on("open", () => {
-      const h = this.addHero();
-      this.conns.set(c, h);
-      c.send({ t: "welcome", id: h.id, color: h.color });
-    });
     c.on("data", d => {
-      const h = this.conns.get(c); if (!h || !d) return;
-      if (d.t === "s") Object.assign(h.input, { mx: +d.mx || 0, my: +d.my || 0, ax: +d.ax || 0, ay: +d.ay || 0, atk: d.atk ? 1 : 0, dash: d.dash ? 1 : 0 });
+      if (!d) return;
+      if (d.t === "hello") { this._bindHero(c, d); return; }
+      const h = c._hero; if (!h || h.conn !== c) return;
+      if (d.t === "s") { Object.assign(h.input, { mx: +d.mx || 0, my: +d.my || 0, ax: +d.ax || 0, ay: +d.ay || 0, atk: d.atk ? 1 : 0, dash: d.dash ? 1 : 0 }); h.lastMsg = performance.now(); }
     });
-    const leave = () => { const h = this.conns.get(c); if (h) { this.removeHero(h); this.conns.delete(c); } };
+    const leave = () => { const h = c._hero; this.conns.delete(c); if (h && h.conn === c) this.deactivateHero(h); };
     c.on("close", leave); c.on("error", leave);
   }
   _sendStatus(dt) {
     this._statusCd = (this._statusCd || 0) - dt;
     if (this._statusCd > 0) return; this._statusCd = 0.2;
-    for (const [c, h] of this.conns) if (c.open) c.send({ t: "st", hp: h.hp, maxHp: h.maxHp, alive: h.alive, weapon: weaponLabel(h.weapon), floor: this.floorNum, gold: h.gold, items: h.items.length, kills: h.kills });
+    for (const [c, h] of this.conns) if (c.open) c.send({ t: "st", hp: h.hp, maxHp: h.maxHp, alive: h.alive, weapon: weaponLabel(h.weapon), floor: this.floorNum, gold: h.gold, items: h.items.length, itemNames: h.items.map(id => ITEMS[id].name), kills: h.kills, name: h.nick });
   }
 }

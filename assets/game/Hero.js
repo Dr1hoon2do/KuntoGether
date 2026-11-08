@@ -2,47 +2,54 @@ const playerColor = id => `hsl(${Math.round((id * 137.5 + 200) % 360)},75%,62%)`
 const angDiff = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
 
 // 플레이어. input: { mx, my, ax, ay, atk, dash } (스틱 값 -1~1, Y-up)
+// pid: 폰이 저장해 두는 기기 ID. 같은 pid로 다시 접속하면 같은 Hero(아이템·골드·체력 유지)를 되돌려 준다.
 class Hero extends Component {
-  constructor(game, id) {
+  constructor(game, id, pid) {
     super();
-    this.game = game; this.id = id; this.color = playerColor(id);
-    this.input = { mx: 0, my: 0, ax: 0, ay: 0, atk: 0, dash: 0 };
+    this.game = game; this.id = id; this.pid = pid; this.nick = `P${id + 1}`; this.conn = null;
+    this.color = playerColor(id);
+    this.input = { mx: 0, my: 0, ax: 0, ay: 0, atk: 0, dash: 0 }; this.lastMsg = 0;
     this.resetRun();
     this.alive = true; this.invuln = 0; this.facing = -Math.PI / 2;
-    this.cd = 0; this.swing = null; this.dashT = 0; this.dashCd = 0; this.dashDir = 0; this.prevDash = 0;
+    this.cd = 0; this.swing = null; this.echoes = []; this.dashT = 0; this.dashCd = 0; this.dashDir = 0; this.prevDash = 0;
     this.kx = 0; this.ky = 0; this.radius = 6; this.keyboard = false;
   }
-  resetRun() { // 새 게임을 시작할 때 초기화
+  resetRun() { // 새 게임을 시작할 때 초기화 (닉네임·pid는 유지)
     this.maxHp = 6; this.hp = 6; this.kills = 0; this.gold = 0; this.items = []; this.stats = newStats();
-    this.weapon = { id: "sword", tier: 0 };
+    this.weapon = { id: "sword", tier: 0 }; this.leechN = 0; this.regenT = 0; this.echoes = [];
   }
   setup() {
-    this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), 16, { order: 5 }));
+    this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), 18, { order: 5 }));
   }
   // 아이템 효과가 반영된 현재 무기 능력치
   getWeapon() {
     const b = WEAPONS[this.weapon.id], t = TIERS[this.weapon.tier], s = this.stats;
-    return { ...b, dmg: b.dmg * t.mult * s.dmg, range: b.range * s.range, cd: b.cd / s.atkSpeed, knock: b.knock * s.knock };
+    const berserk = 1 + s.berserk * (1 - Math.max(0, this.hp) / this.maxHp);
+    return { ...b, dmg: b.dmg * t.mult * s.dmg * berserk, range: b.range * s.range, cd: b.cd / s.atkSpeed, knock: b.knock * s.knock, tier: this.weapon.tier };
   }
   addGold(n) { const v = Math.max(1, Math.round(n * this.stats.gold)); this.gold += v; return v; }
   giveItem(id) { this.items.push(id); ITEMS[id].apply(this); }
 
   _draw(ctx, r) {
     const wd = TIERS[this.weapon.tier];
-    if (!this.alive) { ctx.fillStyle = this.color; ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(0, 0, 6, 0, 7); ctx.fill(); return; }
-    ctx.fillStyle = r.flash > 0 ? "#fff" : this.color;
-    ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, 7); ctx.fill();
-    ctx.strokeStyle = "#000a"; ctx.lineWidth = 1; ctx.stroke();
-    ctx.save(); ctx.rotate(this.facing); ctx.strokeStyle = wd.color; ctx.lineWidth = 2; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(this.radius - 1, 0); ctx.lineTo(this.radius + 7, 0); ctx.stroke();
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(3, 0, 1.4, 0, 7); ctx.fill();
-    ctx.restore();
+    if (this.alive) {
+      ctx.fillStyle = r.flash > 0 ? "#fff" : this.color;
+      ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, 7); ctx.fill();
+      ctx.strokeStyle = "#000a"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.save(); ctx.rotate(this.facing); ctx.strokeStyle = wd.color; ctx.lineWidth = 2; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(this.radius - 1, 0); ctx.lineTo(this.radius + 7, 0); ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(3, 0, 1.4, 0, 7); ctx.fill();
+      ctx.restore();
+    } else { ctx.fillStyle = this.color; ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(0, 0, 6, 0, 7); ctx.fill(); ctx.globalAlpha = 0.6; }
+    ctx.save(); ctx.scale(1, -1); ctx.fillStyle = this.alive ? "#fff" : "#aaa"; ctx.font = "bold 5.5px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.strokeStyle = "#000c"; ctx.lineWidth = 1.4; ctx.strokeText(this.nick, 0, -(this.radius + 5)); ctx.fillText(this.nick, 0, -(this.radius + 5)); ctx.restore();
   }
   update(dt) {
     if (!this.alive) return;
     const g = this.game, i = this.input, t = this.transform, s = this.stats;
     this.invuln -= dt; this.cd -= dt; this.dashCd -= dt;
     this.draw.opacity = this.invuln > 0 && Math.floor(this.invuln * 14) % 2 ? 0.35 : 1;
+    if (s.regen > 0) { this.regenT += dt; if (this.regenT >= 30 / s.regen) { this.regenT = 0; if (this.hp < this.maxHp) { this.heal(1); g.fx.emit(t.position.x, t.position.y, { count: 5, colors: ["#81c784", "#fff"], speed: [10, 30], life: [0.3, 0.5], size: [1, 2], fade: true }); } } }
 
     let mx = i.mx, my = i.my; const ml = Math.hypot(mx, my);
     if (ml > 1) { mx /= ml; my /= ml; }
@@ -56,7 +63,7 @@ class Hero extends Component {
     this.prevDash = i.dash;
 
     let vx = mx * 82 * s.speed, vy = my * 82 * s.speed;
-    if (this.dashT > 0) { this.dashT -= dt; vx = Math.cos(this.dashDir) * 230; vy = Math.sin(this.dashDir) * 230; }
+    if (this.dashT > 0) { this.dashT -= dt; vx = Math.cos(this.dashDir) * 230 * s.dashPower; vy = Math.sin(this.dashDir) * 230 * s.dashPower; }
     if (this.swing) { vx *= 0.35; vy *= 0.35; }
     vx += this.kx; vy += this.ky; this.kx *= Math.max(0, 1 - 9 * dt); this.ky *= Math.max(0, 1 - 9 * dt);
     const p = t.position;
@@ -64,7 +71,11 @@ class Hero extends Component {
       Math.max(-ARENA_W / 2 + 7, Math.min(ARENA_W / 2 - 7, p.x + vx * dt)),
       Math.max(-ARENA_H / 2 + 7, Math.min(ARENA_H / 2 - 7, p.y + vy * dt)));
 
-    if (this.swing) { this.swing.t -= dt; if (this.swing.t <= 0) { this._strike(this.swing.dir, this.swing.w); this.swing = null; } }
+    for (let k = this.echoes.length - 1; k >= 0; k--) { // 연타·메아리 칼날의 추가 타격
+      const e = this.echoes[k]; e.t -= dt;
+      if (e.t <= 0) { this.echoes.splice(k, 1); g.spawnSlash(this, e.dir, e.w); this._strike(e.dir, e.w, true); }
+    }
+    if (this.swing) { this.swing.t -= dt; if (this.swing.t <= 0) { const sw = this.swing; this.swing = null; this._strike(sw.dir, sw.w, false); } }
     else if (i.atk && this.cd <= 0 && this.dashT <= 0) this._startSwing();
   }
   _startSwing() {
@@ -79,7 +90,7 @@ class Hero extends Component {
     this.facing = dir; this.cd = w.cd; this.swing = { t: w.delay, dir, w };
     g.spawnSlash(this, dir, w);
   }
-  _strike(dir, w) {
+  _strike(dir, w, isEcho) {
     const g = this.game, p = this.transform.position, s = this.stats;
     const dmg = w.dmg * (Math.random() < s.crit ? 2 : 1), half = (w.arc * Math.PI / 180) / 2;
     const inArc = (x, y, pad) => {
@@ -91,21 +102,29 @@ class Hero extends Component {
     for (const e of g.enemies) {
       if (e.dead || e.spawnDelay > 0) continue;
       const ep = e.transform.position;
-      if (inArc(ep.x, ep.y, e.radius)) { e.damage(dmg, this, Math.atan2(ep.y - p.y, ep.x - p.x), w.knock); hit++; }
+      if (inArc(ep.x, ep.y, e.radius)) { e.damage(dmg, this, Math.atan2(ep.y - p.y, ep.x - p.x), w.knock); e.applyStatus(w, this); hit++; }
     }
     for (const pr of g.projs) { // 적 탄 튕겨내기
       if (pr.fromPlayer || pr.gameObject.isDestroyed) continue;
       const pp = pr.transform.position;
       if (inArc(pp.x, pp.y, 4)) { pr.owner = this; pr.reflect(this, dir); }
     }
-    for (let b = 0; b < s.beam; b++) g.spawnProj(p.x, p.y, dir + (b - (s.beam - 1) / 2) * 0.25, 190, w.dmg * 0.5, true, { pierce: true, beam: true, life: 0.9, owner: this });
+    if (hit && w.leech) { this.leechN += hit; while (this.leechN >= w.leech) { this.leechN -= w.leech; this.heal(1); } }
+    if (!isEcho) {
+      for (let b = 0; b < s.beam; b++) g.spawnProj(p.x, p.y, dir + (b - (s.beam - 1) / 2) * 0.25, 190, w.dmg * 0.5, true, { pierce: true, beam: true, life: 0.9, owner: this });
+      for (let k = 1; k < (w.hits || 1); k++) this.echoes.push({ t: 0.1 * k, dir, w });
+      if (Math.random() < s.doubleSwing) this.echoes.push({ t: 0.16, dir, w });
+    }
     if (hit) g.cam.shake(w.knock > 150 ? 2.5 : 1.2, 0.1);
   }
   hit(n, fromX, fromY, kb = 120) {
     if (!this.alive || this.invuln > 0) return;
-    const g = this.game, s = this.stats;
+    const g = this.game, s = this.stats, p = this.transform.position;
+    if (Math.random() < Math.min(0.6, s.dodge)) { // 회피 부적
+      this.invuln = 0.4; g.fx.emit(p.x, p.y, { count: 6, colors: ["#fff", this.color], speed: [20, 50], life: [0.2, 0.4], size: [1, 1.6], fade: true }); return;
+    }
     this.hp -= n; this.invuln = 1.0 + s.invuln; this.draw.flash = 0.1;
-    const p = this.transform.position, a = Math.atan2(p.y - fromY, p.x - fromX);
+    const a = Math.atan2(p.y - fromY, p.x - fromX);
     this.kx = Math.cos(a) * kb; this.ky = Math.sin(a) * kb; this.swing = null;
     g.cam.shake(3, 0.25);
     g.fx.emit(p.x, p.y, { count: 12, colors: [this.color, "#fff"], speed: [30, 90], life: [0.3, 0.6], size: [1, 2.5], fade: true });
@@ -122,9 +141,9 @@ class Hero extends Component {
     if (this.stats.extraLives > 0) { // 앙크: 부활
       this.stats.extraLives--; this.hp = Math.ceil(this.maxHp / 2); this.invuln = 2.5;
       g.fx.emit(p.x, p.y, { count: 30, colors: ["#fff59d", "#fff"], speed: [30, 110], life: [0.4, 0.8], size: [1, 2.5], fade: true });
-      g.toast(`P${this.id + 1} 앙크로 부활!`, 2); return;
+      g.toast(`${this.nick} 앙크로 부활!`, 2); return;
     }
-    this.alive = false; this.hp = 0; this.swing = null;
+    this.alive = false; this.hp = 0; this.swing = null; this.echoes = [];
     g.fx.emit(p.x, p.y, { count: 28, colors: [this.color, "#fff"], speed: [20, 120], life: [0.4, 0.9], size: [1, 3], fade: true });
   }
   revive(hp) { this.alive = true; this.hp = Math.min(hp, this.maxHp); this.invuln = 1.5; this.draw.flash = 0; this.kx = this.ky = 0; }

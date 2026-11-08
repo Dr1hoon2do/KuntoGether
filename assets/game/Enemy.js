@@ -119,6 +119,7 @@ class Enemy extends Component {
     this.color = def.color; this.resist = def.resist || 0;
     this.spawnDelay = opts.delay ?? 0.7; this.kx = 0; this.ky = 0; this.t = Math.random() * 6;
     this.dead = false; this.busy = null; this.fuse = 0;
+    this.burn = null; this.slowT = 0; this.slowMul = 1; this.stunT = 0; // 상태이상
     this.phaseIdx = -1; this.atk = []; this._enterPhase(0);
   }
   _phases() { return this.def.phases || [{ at: 1, attacks: this.def.attacks || [] }]; }
@@ -129,6 +130,12 @@ class Enemy extends Component {
   }
   setup() {
     this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), this.radius + 70, { order: this.boss ? 4 : 4 }));
+  }
+  // 무기 특수효과(화상·둔화·기절). 보스는 기절 면역.
+  applyStatus(w, by) {
+    if (w.burn) this.burn = { t: w.burn.dur, dps: w.burn.dps, by, tick: 0.5 };
+    if (w.slow) { this.slowT = w.slow.dur; this.slowMul = w.slow.mul; }
+    if (w.stun && !this.boss) { this.stunT = w.stun; this.busy = null; }
   }
   _count(d, key = "count") { return Math.round(d[key] + (d.countScale ? this.sc.countAdd : 0)); }
 
@@ -157,6 +164,9 @@ class Enemy extends Component {
     else if (k === "poly") { const n = this.def.sides || 6; for (let i = 0; i < n; i++) { const a = i * Math.PI * 2 / n + this.t * 0.8; ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad); } ctx.closePath(); }
     else ctx.rect(-rad, -rad, rad * 2, rad * 2);
     ctx.fill();
+    if (this.burn) { ctx.strokeStyle = "#ff6d00"; ctx.lineWidth = 1.6; ctx.stroke(); }
+    else if (this.slowT > 0) { ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 1.6; ctx.stroke(); }
+    if (this.stunT > 0) { ctx.fillStyle = "#fff59d"; ctx.fillRect(-1.5, -rad - 6, 3, 3); ctx.fillRect(-rad * 0.6, -rad - 4, 3, 3); ctx.fillRect(rad * 0.6 - 3, -rad - 4, 3, 3); }
     if (this.elite) { ctx.strokeStyle = "#ffd54f"; ctx.lineWidth = 1.6; ctx.stroke(); ctx.fillStyle = "#ffd54f"; ctx.fillRect(-2, rad + 5, 4, 3); }
     ctx.fillStyle = "#000"; const e = Math.max(1.5, rad * 0.22); ctx.fillRect(-rad * 0.45, rad * 0.1, e, e); ctx.fillRect(rad * 0.2, rad * 0.1, e, e);
     if (!this.boss && this.maxHp > 8 && this.hp < this.maxHp) {
@@ -169,6 +179,14 @@ class Enemy extends Component {
     if (this.spawnDelay > 0) { this.spawnDelay -= dt; return; }
     this.t += dt;
     const g = this.game, p = this.transform.position;
+    if (this.burn) { // 화상: 0.5초마다 피해
+      this.burn.t -= dt; this.burn.tick -= dt;
+      if (this.burn.tick <= 0) { this.burn.tick = 0.5; g.fx.emit(p.x, p.y, { count: 3, colors: ["#ff6d00", "#ffee58"], speed: [10, 30], life: [0.2, 0.4], size: [1, 1.6], fade: true }); this.damage(this.burn.dps * 0.5, this.burn.by, 0, 0); if (this.dead) return; }
+      if (this.burn && this.burn.t <= 0) this.burn = null;
+    }
+    if (this.slowT > 0) this.slowT -= dt;
+    const stunned = this.stunT > 0; if (stunned) this.stunT -= dt;
+    const slow = this.slowT > 0 ? this.slowMul : 1;
     if (this.boss) { const ph = this._phases(), next = ph[this.phaseIdx + 1]; if (next && this.hp / this.maxHp <= next.at) { this._enterPhase(this.phaseIdx + 1); g.cam.shake(4, 0.4); g.toast(`${this.title} 격노!`, 1.5); } }
     let target = null, td = Infinity;
     for (const h of g.heroes) { if (!h.alive) continue; const hp = h.transform.position, d = Math.hypot(hp.x - p.x, hp.y - p.y); if (d < td) { td = d; target = h; } }
@@ -176,9 +194,10 @@ class Enemy extends Component {
     if (target) {
       const tp = target.transform.position, a = Math.atan2(tp.y - p.y, tp.x - p.x);
       this.face = a;
-      const sp = this.speed;
+      const sp = this.speed * slow;
       const b = this.busy;
-      if (b) [vx, vy] = this._runBusy(dt, a, target);
+      if (stunned) { vx = vy = 0; }
+      else if (b) [vx, vy] = this._runBusy(dt, a, target);
       else {
         switch (this.def.ai) {
           case "kite": { const [n, f] = this.def.keep || [60, 90]; const m = td > f ? 1 : td < n ? -1 : 0; vx = Math.cos(a) * sp * m; vy = Math.sin(a) * sp * m; break; }
@@ -189,7 +208,7 @@ class Enemy extends Component {
           default: vx = Math.cos(a) * sp; vy = Math.sin(a) * sp;
         }
         for (const at of this.atk) {
-          at.cd -= dt * this.sc.rate;
+          at.cd -= dt * this.sc.rate * slow;
           if (at.cd <= 0 && td <= (at.d.range ?? Infinity)) { this._begin(at, a, target); if (this.busy) break; }
         }
       }
@@ -266,6 +285,7 @@ class Enemy extends Component {
   damage(n, by, angle, knock) {
     if (this.dead || this.spawnDelay > 0) return;
     this.hp -= n; this.draw.flash = 0.07;
+    if (by && by.stats && by.stats.execute && !this.boss && this.hp > 0 && this.hp / this.maxHp < by.stats.execute) this.hp = 0; // 처형자의 휘장
     const k = knock * (1 - this.resist);
     this.kx += Math.cos(angle) * k; this.ky += Math.sin(angle) * k;
     const p = this.transform.position;
@@ -277,8 +297,9 @@ class Enemy extends Component {
     const g = this.game, p = this.transform.position, def = this.def;
     g.fx.emit(p.x, p.y, { count: this.boss ? 60 : 14, colors: [this.color, "#fff"], speed: [30, 110], life: [0.3, 0.7], size: [1, 2.8], fade: true });
     if (def.onDeath && !quiet) for (let i = 0; i < def.onDeath.count; i++) { const a = i * 3.14 + Math.random(); g.spawnEnemy(def.onDeath.spawn, p.x + Math.cos(a) * 8, p.y + Math.sin(a) * 8, { delay: 0.2 }); }
-    if (!this.boss && def.gold && (this.elite || Math.random() < (def.goldChance ?? 0))) {
-      const [lo, hi] = def.gold, n = (lo + Math.floor(Math.random() * (hi - lo + 1))) * (this.elite ? 2 : 1);
+    const bonus = by && by.stats ? by.stats.coinDrop : 0;
+    if (!this.boss && (def.gold || bonus > 0) && (this.elite || Math.random() < (def.goldChance ?? 0) + bonus)) {
+      const [lo, hi] = def.gold || [1, 1], n = (lo + Math.floor(Math.random() * (hi - lo + 1))) * (this.elite ? 2 : 1);
       g.spawnCoin(p.x, p.y, n);
     }
     if (by) by.kills++;
@@ -302,7 +323,7 @@ class Projectile extends Component {
       ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, this.radius * 0.45, 0, 7); ctx.fill();
     }, 10, { order: 6 }));
   }
-  reflect(hero, dir) { this.fromPlayer = true; const s = Math.hypot(this.vx, this.vy) * 1.5; this.vx = Math.cos(dir) * s; this.vy = Math.sin(dir) * s; this.dmg = 3; this.life = 3; }
+  reflect(hero, dir) { this.fromPlayer = true; const s = Math.hypot(this.vx, this.vy) * 1.5; this.vx = Math.cos(dir) * s; this.vy = Math.sin(dir) * s; this.dmg = 3 * (1 + (hero.stats.reflect || 0)); this.life = 3; }
   update(dt) {
     const t = this.transform, p = t.position, g = this.game;
     t.setPosition(p.x + this.vx * dt, p.y + this.vy * dt);

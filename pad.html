@@ -2,21 +2,34 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>KuntoGether - 컨트롤러</title>
 <style>
   html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;color:#eee;font-family:sans-serif;
-    touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-  #pad{position:fixed;inset:0;width:100%;height:100%}
-  #hud{position:fixed;left:0;right:0;top:0;padding:8px 12px;display:flex;justify-content:space-between;font-size:15px;pointer-events:none;text-shadow:0 0 4px #000}
-  #msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font-size:20px;background:#000a;pointer-events:none;white-space:pre-line}
+    touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+  #pad{position:fixed;inset:0;width:100%;height:100%;touch-action:none}
+  #hud{position:fixed;left:0;right:0;top:0;padding:8px 12px;display:flex;justify-content:space-between;gap:8px;font-size:15px;pointer-events:none;text-shadow:0 0 4px #000}
+  #items{position:fixed;left:12px;right:12px;top:34px;font-size:12px;color:#ffe082;pointer-events:none;text-shadow:0 0 4px #000;line-height:1.35}
+  #msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font-size:20px;background:#000a;pointer-events:none;white-space:pre-line;padding:0 20px}
   #msg.hide{display:none}
+  #login{position:fixed;inset:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px;box-sizing:border-box}
+  #login.hide{display:none}
+  #login input{font-size:22px;padding:12px;width:min(320px,90%);box-sizing:border-box;border-radius:10px;border:0;text-align:center}
+  #login button{font-size:20px;padding:12px 24px;width:min(320px,90%);border:0;border-radius:10px;background:#3a7;color:#fff}
+  #login small{color:#789}
 </style>
 </head>
 <body>
 <canvas id="pad"></canvas>
 <div id="hud"><span id="hp"></span><span id="score"></span></div>
-<div id="msg">연결 중...</div>
+<div id="items"></div>
+<div id="msg" class="hide"></div>
+<form id="login" class="hide">
+  <div style="font-size:22px">닉네임을 정해 주세요</div>
+  <input id="nick" maxlength="10" placeholder="닉네임 (최대 10글자)" autocomplete="off">
+  <button type="submit">입장</button>
+  <small id="roomInfo"></small>
+</form>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="shared/turn.js"></script>
 <script src="shared/room.js"></script>
@@ -24,38 +37,53 @@
 const $ = id => document.getElementById(id);
 const code = normalizeCode(new URLSearchParams(location.search).get("join") || "");
 const msg = t => { $("msg").textContent = t || ""; $("msg").classList.toggle("hide", !t); };
+const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
 
-// ---------- 조작: 왼쪽 = 이동 스틱, 오른쪽 아무 데나 = 공격(누른 채 드래그하면 그 방향으로), 오른쪽 아래 버튼 = 대시 ----------
-const cv = $("pad"), g = cv.getContext("2d"), R = 55; // 스틱 최대 반경(px)
-const sticks = { move: null, aim: null }; // { id, ox, oy, x, y }
-let dashPtr = null, color = "#4fc3f7", weapon = "";
+// 기기 ID: 이 폰을 구분하는 값. 다시 접속해도 같은 캐릭터(아이템·골드)를 이어서 쓰게 한다.
+let pid = store.get("kg.pid");
+if (!pid) { pid = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)); store.set("kg.pid", pid); }
+let nick = store.get("kg.nick") || "";
+
+// ---------- 조작: 왼쪽 = 이동 스틱, 오른쪽 아무 데나 = 공격(누른 채 드래그하면 그 방향), 오른쪽 아래 버튼 = 대시 ----------
+// 터치를 id별로 추적하고, 터치 이벤트마다 "지금 실제로 눌려 있는 터치 목록"과 대조해서 떼어진 손가락의 찌꺼기(스틱 고정)를 지운다.
+const cv = $("pad"), g = cv.getContext("2d");
+const touches = new Map(); // id -> { role: move|aim|dash, ox, oy, x, y }
+let color = "#4fc3f7";
+const R = () => Math.max(45, Math.min(80, Math.min(innerWidth, innerHeight) * 0.14));
 const dashBtn = () => ({ x: innerWidth - 70, y: innerHeight - 70, r: 42 });
+const hasRole = r => [...touches.values()].some(t => t.role === r);
 function resize() { cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio; g.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0); draw(); }
-addEventListener("resize", resize);
+addEventListener("resize", resize); addEventListener("orientationchange", () => setTimeout(resize, 200));
 
-cv.addEventListener("pointerdown", e => {
-  cv.setPointerCapture(e.pointerId);
+function pStart(id, x, y) {
   const d = dashBtn();
-  if (dashPtr === null && Math.hypot(e.clientX - d.x, e.clientY - d.y) < d.r + 10) { dashPtr = e.pointerId; draw(); return; }
-  const k = e.clientX < innerWidth / 2 ? "move" : "aim";
-  if (sticks[k]) return;
-  sticks[k] = { id: e.pointerId, ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY };
-  draw();
-});
-cv.addEventListener("pointermove", e => {
-  for (const s of Object.values(sticks)) if (s && s.id === e.pointerId) { s.x = e.clientX; s.y = e.clientY; }
-  draw();
-});
-const end = e => {
-  for (const k in sticks) if (sticks[k] && sticks[k].id === e.pointerId) sticks[k] = null;
-  if (dashPtr === e.pointerId) dashPtr = null;
-  draw();
-};
-cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
+  let role = Math.hypot(x - d.x, y - d.y) < d.r + 10 ? "dash" : x < innerWidth / 2 ? "move" : "aim";
+  if (hasRole(role)) return;
+  touches.set(id, { role, ox: x, oy: y, x, y });
+}
+function pMove(id, x, y) { const t = touches.get(id); if (t) { t.x = x; t.y = y; } }
+function pEnd(id) { touches.delete(id); }
+function reconcile(active) { for (const id of [...touches.keys()]) if (id !== "mouse" && !active.has(id)) touches.delete(id); } // 이미 떼어진 터치 제거
+function clearAll() { touches.clear(); draw(); }
 
-const vec = s => {
-  if (!s) return [0, 0];
-  let dx = (s.x - s.ox) / R, dy = -(s.y - s.oy) / R; // 화면 Y-down → 월드 Y-up
+const opt = { passive: false };
+cv.addEventListener("touchstart", e => { e.preventDefault(); for (const t of e.changedTouches) pStart(t.identifier, t.clientX, t.clientY); reconcile(new Set([...e.touches].map(t => t.identifier))); draw(); }, opt);
+cv.addEventListener("touchmove", e => { e.preventDefault(); for (const t of e.changedTouches) pMove(t.identifier, t.clientX, t.clientY); draw(); }, opt);
+const tend = e => { e.preventDefault(); for (const t of e.changedTouches) pEnd(t.identifier); reconcile(new Set([...e.touches].map(t => t.identifier))); draw(); };
+cv.addEventListener("touchend", tend, opt); cv.addEventListener("touchcancel", tend, opt);
+// 데스크톱 마우스 (테스트용)
+let lastTouch = 0; cv.addEventListener("touchstart", () => { lastTouch = Date.now(); }, opt);
+cv.addEventListener("mousedown", e => { if (Date.now() - lastTouch > 600) { pStart("mouse", e.clientX, e.clientY); draw(); } });
+addEventListener("mousemove", e => { pMove("mouse", e.clientX, e.clientY); if (touches.has("mouse")) draw(); });
+addEventListener("mouseup", () => { pEnd("mouse"); draw(); });
+// 화면이 가려지거나 포커스를 잃으면 전부 해제
+addEventListener("blur", clearAll); addEventListener("pagehide", clearAll);
+document.addEventListener("visibilitychange", () => { clearAll(); if (!document.hidden) ensureConnected(); });
+document.addEventListener("gesturestart", e => e.preventDefault()); document.addEventListener("contextmenu", e => e.preventDefault());
+
+const vec = role => {
+  const t = [...touches.values()].find(t => t.role === role); if (!t) return [0, 0];
+  let dx = (t.x - t.ox) / R(), dy = -(t.y - t.oy) / R(); // 화면 Y-down → 월드 Y-up
   const l = Math.hypot(dx, dy); if (l > 1) { dx /= l; dy /= l; }
   return [dx, dy];
 };
@@ -64,61 +92,87 @@ function draw() {
   g.strokeStyle = "#ffffff18"; g.beginPath(); g.moveTo(innerWidth / 2, 0); g.lineTo(innerWidth / 2, innerHeight); g.stroke();
   g.fillStyle = "#ffffff30"; g.font = "14px sans-serif"; g.textAlign = "center";
   g.fillText("이동", innerWidth / 4, innerHeight - 20); g.fillText("터치 = 공격 (드래그로 방향)", innerWidth * 3 / 4 - 40, innerHeight - 20);
-  const d = dashBtn();
-  g.fillStyle = dashPtr !== null ? color + "cc" : color + "44"; g.beginPath(); g.arc(d.x, d.y, d.r, 0, 7); g.fill();
+  const d = dashBtn(), dashOn = hasRole("dash");
+  g.fillStyle = dashOn ? color + "cc" : color + "44"; g.beginPath(); g.arc(d.x, d.y, d.r, 0, 7); g.fill();
   g.strokeStyle = color; g.lineWidth = 2; g.stroke(); g.fillStyle = "#fff"; g.fillText("대시", d.x, d.y + 5);
-  for (const [k, s] of Object.entries(sticks)) if (s) {
-    g.strokeStyle = k === "aim" ? "#ff8a65" : color; g.lineWidth = 2; g.beginPath(); g.arc(s.ox, s.oy, R, 0, 7); g.stroke();
-    const l = Math.hypot(s.x - s.ox, s.y - s.oy) || 1, m = Math.min(l, R);
-    g.fillStyle = (k === "aim" ? "#ff8a65" : color) + "aa"; g.beginPath(); g.arc(s.ox + (s.x - s.ox) / l * m, s.oy + (s.y - s.oy) / l * m, 24, 0, 7); g.fill();
+  for (const t of touches.values()) if (t.role !== "dash") {
+    const c = t.role === "aim" ? "#ff8a65" : color, r = R();
+    g.strokeStyle = c; g.lineWidth = 2; g.beginPath(); g.arc(t.ox, t.oy, r, 0, 7); g.stroke();
+    const l = Math.hypot(t.x - t.ox, t.y - t.oy) || 1, m = Math.min(l, r);
+    g.fillStyle = c + "aa"; g.beginPath(); g.arc(t.ox + (t.x - t.ox) / l * m, t.oy + (t.y - t.oy) / l * m, 24, 0, 7); g.fill();
   }
 }
 
-// ---------- 연결 ----------
-if (!code) { msg("방 코드가 없습니다.\n처음 화면에서 입력해 주세요."); }
-else (async () => {
-  // 단계별로 상태를 보여 줘서 어디서 막혔는지 알 수 있게 한다
-  msg("1/3 서버에 접속 중...");
-  const peer = new Peer(undefined, await getPeerOptions());
-  const fail = t => { if (!$("msg").classList.contains("hide")) msg(t); };
-  const serverTimer = setTimeout(() => fail("서버에 접속하지 못했어요.\n(PeerJS 서버 연결 실패 — 네트워크/차단 확인)"), 10000);
-  peer.on("error", e => msg(e.type === "peer-unavailable" ? "방을 찾을 수 없어요.\n코드를 다시 확인해 주세요." : e.type === "negotiation-failed" ? "TV와 연결 경로를 못 찾았어요.\n(네트워크가 서로 달라 막힌 경우예요 — 같은 와이파이로 다시 시도)" : "에러: " + e.type + "\n" + (e.message || "")));
-  peer.on("open", () => {
-    clearTimeout(serverTimer);
+// ---------- 연결 (끊기면 자동 재접속. 같은 pid라서 캐릭터가 이어진다) ----------
+let peer = null, conn = null, sendTimer = 0, retryTimer = 0, retries = 0, started = false, connected = false;
+function teardown() { clearInterval(sendTimer); clearTimeout(retryTimer); connected = false; try { conn && conn.close(); } catch (e) {} try { peer && peer.destroy(); } catch (e) {} conn = peer = null; }
+function scheduleRetry(text) {
+  clearTimeout(retryTimer);
+  if (++retries > 12) { msg("방에 연결할 수 없어요.\n(TV 화면이 닫혔거나 방 코드가 바뀌었을 수 있어요)\n처음 화면에서 다시 입력해 주세요."); return; }
+  msg(text + `\n재접속 중... (${retries})`); retryTimer = setTimeout(start, 2500);
+}
+function ensureConnected() { if (started && !connected && retries <= 12 && !retryTimer) start(); }
+
+async function start() {
+  teardown(); retryTimer = 0; started = true;
+  msg(retries ? `재접속 중... (${retries})` : "1/3 서버에 접속 중...");
+  const myPeer = peer = new Peer(undefined, await getPeerOptions());
+  const serverTimer = setTimeout(() => { if (peer === myPeer && !connected) scheduleRetry("서버에 접속하지 못했어요."); }, 10000);
+  myPeer.on("error", e => {
+    if (peer !== myPeer) return; clearTimeout(serverTimer);
+    if (e.type === "peer-unavailable") scheduleRetry("방을 찾을 수 없어요.\n코드를 다시 확인해 주세요.");
+    else if (e.type === "negotiation-failed") scheduleRetry("TV와 연결 경로를 못 찾았어요.\n(네트워크가 서로 달라 막힌 경우예요)");
+    else scheduleRetry("에러: " + e.type);
+  });
+  myPeer.on("open", () => {
+    clearTimeout(serverTimer); if (peer !== myPeer) return;
     msg("2/3 TV를 찾는 중...");
-    const diag = { cand: new Set(), state: "-" }; // 진단용: 모은 ICE 후보 종류(host/srflx/relay)와 연결 상태
+    const diag = { cand: new Set(), state: "-" };
     const diagText = () => `\n\n[진단] 후보: ${[...diag.cand].join(",") || "없음"} / 상태: ${diag.state}\n${diag.cand.has("relay") ? "중계(TURN) 경로 있음" : "중계(TURN) 경로 없음"}`;
-    const c = peer.connect(codeToPeerId(code), { reliable: true, serialization: "json" }) // iOS Safari는 binary 직렬화(기본값)에서 문제가 있어 json 사용;
+    const c = conn = myPeer.connect(codeToPeerId(code), { reliable: true, serialization: "json" }); // iOS Safari는 binary 직렬화(기본값)에서 문제가 있어 json 사용
     const pc = c.peerConnection;
     if (pc) {
       pc.addEventListener("icecandidate", ev => { if (ev.candidate && ev.candidate.candidate) { const m = / typ (\w+)/.exec(ev.candidate.candidate); if (m) diag.cand.add(m[1]); } });
       pc.addEventListener("iceconnectionstatechange", () => { diag.state = pc.iceConnectionState; });
     }
-    const rtcTimer = setTimeout(() => fail("TV와 직접 연결하지 못했어요.\n(서로 다른 네트워크이면 막힐 수 있어요 — 같은 와이파이로 시도)" + diagText()), 15000);
-    c.on("error", e => msg(e.type === "negotiation-failed" ? "TV와 연결 경로를 못 찾았어요." + diagText() : "연결 에러: " + (e.type || e)));
-    let timer = 0, last = "";
+    const rtcTimer = setTimeout(() => { if (conn === c && !connected) scheduleRetry("TV와 직접 연결하지 못했어요." + diagText()); }, 15000);
+    c.on("error", e => { if (conn === c && !connected) scheduleRetry(e.type === "negotiation-failed" ? "TV와 연결 경로를 못 찾았어요." + diagText() : "연결 에러: " + (e.type || e)); });
+    let last = "", lastAt = 0;
     c.on("open", () => {
-      clearTimeout(rtcTimer);
-      msg("");
-      timer = setInterval(() => {
-        const [mx, my] = vec(sticks.move), [ax, ay] = vec(sticks.aim);
-        const out = JSON.stringify({ t: "s", mx: +mx.toFixed(2), my: +my.toFixed(2), ax: +ax.toFixed(2), ay: +ay.toFixed(2), atk: sticks.aim ? 1 : 0, dash: dashPtr !== null ? 1 : 0 });
-        if (out !== last) { c.send(JSON.parse(out)); last = out; }
+      clearTimeout(rtcTimer); connected = true; retries = 0; msg("");
+      c.send({ t: "hello", pid, name: nick });
+      sendTimer = setInterval(() => {
+        const [mx, my] = vec("move"), [ax, ay] = vec("aim"), now = Date.now();
+        const out = JSON.stringify({ t: "s", mx: +mx.toFixed(2), my: +my.toFixed(2), ax: +ax.toFixed(2), ay: +ay.toFixed(2), atk: hasRole("aim") ? 1 : 0, dash: hasRole("dash") ? 1 : 0 });
+        if (out !== last || now - lastAt > 150) { c.send(JSON.parse(out)); last = out; lastAt = now; } // 바뀌지 않아도 150ms마다 보내서 TV가 "끊김"을 알아챌 수 있게
       }, 33);
     });
     let prevHp = null;
     c.on("data", d => {
       if (d.t === "welcome") { color = d.color; draw(); }
       else if (d.t === "st") {
-        $("hp").textContent = d.alive ? "♥".repeat(d.hp) + "♡".repeat(d.maxHp - d.hp) : "💀 다음 방에서 부활";
-        $("score").textContent = `${d.floor}층 · ${d.weapon} · ${d.gold}G · ★${d.items}`;
+        $("hp").textContent = d.alive ? "♥".repeat(d.hp) + "♡".repeat(Math.max(0, d.maxHp - d.hp)) : "💀 보스를 쓰러뜨리면 부활";
+        $("score").textContent = `${d.floor}층 · ${d.weapon} · ${d.gold}G`;
+        const cnt = {}; (d.itemNames || []).forEach(n => cnt[n] = (cnt[n] || 0) + 1);
+        $("items").textContent = Object.entries(cnt).map(([n, c]) => c > 1 ? `${n}×${c}` : n).join(" · ");
         if (prevHp !== null && d.hp < prevHp && navigator.vibrate) navigator.vibrate(120);
         prevHp = d.hp;
       }
     });
-    c.on("close", () => { clearInterval(timer); msg("연결이 끊겼어요.\n새로고침하면 다시 접속해요."); });
+    c.on("close", () => { if (conn !== c) return; clearInterval(sendTimer); connected = false; touches.clear(); draw(); scheduleRetry("연결이 끊겼어요."); });
   });
-})();
+}
+
+// ---------- 시작: 닉네임 입력 → 접속 ----------
+if (!code) msg("방 코드가 없습니다.\n처음 화면에서 입력해 주세요.");
+else {
+  $("login").classList.remove("hide"); $("nick").value = nick; $("roomInfo").textContent = `방 코드 ${code}`;
+  $("login").addEventListener("submit", e => {
+    e.preventDefault();
+    nick = Array.from($("nick").value.replace(/[<>]/g, "").trim()).slice(0, 10).join("");
+    store.set("kg.nick", nick); $("login").classList.add("hide"); start();
+  });
+}
 resize();
 </script>
 </body>

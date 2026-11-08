@@ -61,7 +61,8 @@ class MinimapRenderer extends Renderer {
     const g = this.game; if (!g.map) return;
     const m = camera.viewMatrix; ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
     const C = 9, seen = [];
-    for (const r of g.map.list) if (r.visited || Object.values(r.nb).some(o => o.visited)) seen.push(r);
+    const compass = g.heroes.some(h => h.stats.compass); // 나침반: 층 전체 공개
+    for (const r of g.map.list) if (compass || r.visited || Object.values(r.nb).some(o => o.visited)) seen.push(r);
     if (!seen.length) return;
     const xs = seen.map(r => r.x), ys = seen.map(r => r.y);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
