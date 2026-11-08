@@ -3,6 +3,8 @@
 //   rock   : 바위 — 폭발(폭탄·폭발 통·폭발 구슬)로만 부서짐
 //   crate  : 상자 — 아무 공격으로 부서짐, 가끔 코인
 //   barrel : 폭발 통 — 부서지면 주변에 폭발(적·플레이어 모두 피해, 바위·상자도 연쇄 파괴)
+//   void   : L자 방의 빈 칸(보이지 않는 벽)
+// 크기는 플레이어(지름 12)의 2~6배 — 탄막을 피해 숨거나 엄폐할 수 있을 만큼 크다.
 class Obstacle extends Component {
   constructor(game, d) {
     super();
@@ -17,9 +19,10 @@ class Obstacle extends Component {
   update(dt) { if (this.flash > 0) this.flash -= dt; }
   _draw(ctx) {
     const w = this.w, h = this.h, hw = w / 2, hh = h / 2, hit = this.flash > 0, cracked = this.maxHp > 1 && this.hp < this.maxHp;
+    if (this.kind === "void") return;
     ctx.fillStyle = "#0006"; ctx.fillRect(-hw + 1, -hh - 1.5, w, h); // 그림자
     if (this.kind === "pillar" || this.kind === "wall") {
-      ctx.fillStyle = hit ? "#fff" : "#5d5d6b"; ctx.fillRect(-hw, -hh, w, h); ctx.fillStyle = "#7d7d8c"; ctx.fillRect(-hw, hh - 3, w, 3);
+      ctx.fillStyle = hit ? "#fff" : "#5d5d6b"; ctx.fillRect(-hw, -hh, w, h); ctx.fillStyle = "#7d7d8c"; ctx.fillRect(-hw, hh - 4, w, 4); ctx.fillStyle = "#6b6b7a"; ctx.fillRect(-hw + 3, -hh + 3, w - 6, h - 9);
       ctx.strokeStyle = "#2c2c36"; ctx.lineWidth = 1; ctx.strokeRect(-hw, -hh, w, h);
     } else if (this.kind === "rock") {
       ctx.fillStyle = hit ? "#fff" : "#7b6a58"; ctx.beginPath();
@@ -30,15 +33,15 @@ class Obstacle extends Component {
       ctx.beginPath(); ctx.moveTo(-hw, -hh); ctx.lineTo(hw, hh); ctx.moveTo(hw, -hh); ctx.lineTo(-hw, hh); ctx.stroke();
     } else { // barrel
       ctx.fillStyle = hit ? "#fff" : "#c0392b"; ctx.beginPath(); ctx.arc(0, 0, hw, 0, 7); ctx.fill(); ctx.strokeStyle = "#5b1a12"; ctx.lineWidth = 1; ctx.stroke();
-      ctx.strokeStyle = "#f5b7b1"; ctx.beginPath(); ctx.moveTo(-hw * 0.8, -2); ctx.lineTo(hw * 0.8, -2); ctx.moveTo(-hw * 0.8, 2); ctx.lineTo(hw * 0.8, 2); ctx.stroke();
-      ctx.save(); ctx.scale(1, -1); ctx.fillStyle = "#fff"; ctx.font = "bold 6px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("!", 0, 0); ctx.restore();
+      ctx.strokeStyle = "#f5b7b1"; ctx.beginPath(); ctx.moveTo(-hw * 0.8, -3.5); ctx.lineTo(hw * 0.8, -3.5); ctx.moveTo(-hw * 0.8, 3.5); ctx.lineTo(hw * 0.8, 3.5); ctx.stroke();
+      ctx.save(); ctx.scale(1, -1); ctx.fillStyle = "#fff"; ctx.font = "bold 11px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("!", 0, 0); ctx.restore();
     }
     if (cracked) { ctx.strokeStyle = "#000a"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-hw * 0.5, -hh * 0.6); ctx.lineTo(0, 0); ctx.lineTo(hw * 0.3, hh * 0.5); ctx.stroke(); }
   }
   // n 피해. explosion=true면 바위도 부서진다.
   damage(n, by, explosion = false) {
     if (this.dead) return;
-    if (this.kind === "pillar" || this.kind === "wall") return;
+    if (this.kind === "pillar" || this.kind === "wall" || this.kind === "void") return;
     if (this.kind === "rock" && !explosion) { this.flash = 0.05; return; }
     this.hp -= n; this.flash = 0.08; SFX.play("hit");
     if (this.hp <= 0) this.die(by);
@@ -67,27 +70,29 @@ class Bomb extends Component {
   update(dt) { this.t -= dt; if (this.t <= 0) { const p = this.transform.position; this.game.explode(p.x, p.y, 36, 12 * (this.owner ? this.owner.stats.dmg : 1), 0, this.owner); this.gameObject.destroy(); } }
 }
 
-// 방 하나에 놓을 지형 데이터를 만든다. 문 앞·시작 위치·보스 등장 위치는 비워 두고, 서로 22 이상 떨어뜨려서 지나갈 틈을 남긴다.
+// 방 하나에 놓을 지형 데이터를 만든다. 문 앞·시작 위치·보스 등장 위치는 비워 두고, 서로 26 이상 떨어뜨려서 지나갈 틈을 남긴다.
+// 큰 방(여러 칸)은 칸 수만큼 더 많이 놓는다.
 function generateObstacles(room) {
   if (room.type === "treasure" || room.type === "shop") return [];
-  const k = room.big ? ARENA.BIG : 1, W = ARENA.BASE_W * k, H = ARENA.BASE_H * k, hw = W / 2, hh = H / 2, area = k * k;
+  const geo = roomGeo(room), nCells = geo.cells.length, CW = ARENA.BASE_W, CH = ARENA.BASE_H;
   const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
-  let count = room.type === "start" ? rnd(0, 2) : room.type === "boss" ? rnd(2, 4) : rnd(4, 7);
-  count = Math.round(count * Math.pow(area, 0.85));
+  let count = room.type === "start" ? rnd(0, 2) : room.type === "boss" ? rnd(2, 3) : rnd(3, 5);
+  count = Math.round(count * Math.pow(nCells, 0.9));
   const lanes = []; // 지나다녀야 하는 구역 (중심 x, y, 반폭 w, 반높이 h)
-  for (const d of Object.keys(room.nb)) { const [dx, dy] = ({ N: [0, 1], S: [0, -1], E: [1, 0], W: [-1, 0] })[d]; lanes.push(dx ? { x: dx * (hw - 30), y: 0, w: 34, h: 26 } : { x: 0, y: dy * (hh - 30), w: 26, h: 34 }); }
-  lanes.push({ x: 0, y: -hh + 26, w: 46, h: 30 }); // 처음 서는 곳(아래쪽 가운데)
-  if (room.type === "boss") lanes.push({ x: 0, y: hh - 52, w: 50, h: 40 }); // 보스 등장 위치
+  for (const d of Object.keys(room.nb)) { const x = geo.ox + ({ N: 0, S: 0, E: 1, W: -1 })[d] * (CW / 2 - 40), y = geo.oy + ({ N: 1, S: -1, E: 0, W: 0 })[d] * (CH / 2 - 40); lanes.push(d === "N" || d === "S" ? { x, y, w: 48, h: 44 } : { x, y, w: 44, h: 48 }); }
+  lanes.push({ x: geo.ox, y: geo.oy - CH / 2 + 34, w: 64, h: 40 }); // 처음 서는 곳(소유 칸 아래쪽 가운데)
+  if (room.type === "boss") lanes.push({ x: geo.ox, y: geo.oy + CH / 2 - 56, w: 60, h: 48 }); // 보스 등장 위치
   const kinds = room.type === "boss" || room.type === "start" ? ["pillar", "pillar", "wall", "rock"] : ["pillar", "pillar", "wall", "crate", "crate", "crate", "barrel", "rock"];
-  const out = [], hit = (a, b, m) => Math.abs(a.x - b.x) < a.w / 2 + b.w + m && Math.abs(a.y - b.y) < a.h / 2 + b.h + m;
-  for (let tries = 0; out.length < count && tries < 400; tries++) {
+  const gap = room.type === "boss" ? 46 : 26; // 보스는 덩치가 커서 지나갈 틈을 더 넓게
+  const out = [];
+  for (let tries = 0; out.length < count && tries < 600; tries++) {
     const kind = kinds[Math.floor(Math.random() * kinds.length)];
-    const o = kind === "pillar" ? { kind, w: 14, h: 14, hp: 999 } : kind === "wall" ? (Math.random() < 0.5 ? { kind, w: 14, h: 34, hp: 999 } : { kind, w: 34, h: 14, hp: 999 }) :
-              kind === "rock" ? { kind, w: 18, h: 16, hp: 1 } : kind === "crate" ? { kind, w: 13, h: 13, hp: 3 } : { kind, w: 12, h: 12, hp: 1 };
-    o.x = (Math.random() * 2 - 1) * (hw - 30); o.y = (Math.random() * 2 - 1) * (hh - 30);
-    const half = { x: o.x, y: o.y, w: o.w, h: o.h };
+    const o = kind === "pillar" ? { kind, w: 26, h: 26, hp: 999 } : kind === "wall" ? (Math.random() < 0.5 ? { kind, w: 26, h: 70, hp: 999 } : { kind, w: 70, h: 26, hp: 999 }) :
+              kind === "rock" ? { kind, w: 34, h: 28, hp: 1 } : kind === "crate" ? { kind, w: 22, h: 22, hp: 3 } : { kind, w: 22, h: 22, hp: 1 };
+    const c = geo.cells[Math.floor(Math.random() * geo.cells.length)];
+    o.x = c.x + (Math.random() * 2 - 1) * (CW / 2 - 50); o.y = c.y + (Math.random() * 2 - 1) * (CH / 2 - 50);
     if (lanes.some(l => Math.abs(l.x - o.x) < l.w + o.w / 2 && Math.abs(l.y - o.y) < l.h + o.h / 2)) continue;
-    if (out.some(b => Math.abs(b.x - o.x) < (b.w + o.w) / 2 + 22 && Math.abs(b.y - o.y) < (b.h + o.h) / 2 + 22)) continue;
+    if (out.some(b => Math.abs(b.x - o.x) < (b.w + o.w) / 2 + gap && Math.abs(b.y - o.y) < (b.h + o.h) / 2 + gap)) continue;
     out.push(o);
   }
   return out;

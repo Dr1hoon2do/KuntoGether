@@ -30,16 +30,26 @@ const DOOR_W = 30;
 class ArenaRenderer extends Renderer {
   constructor(game) { super(); this.game = game; this.sortingLayer = "Background"; }
   render(ctx, camera) {
-    const m = camera.viewMatrix, g = this.game;
+    const m = camera.viewMatrix, g = this.game, cp = camera.transform.position, locked = g.state !== "explore";
     ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
-    const hw = ARENA.w / 2, hh = ARENA.h / 2, locked = g.state !== "explore";
-    ctx.fillStyle = "#14110f"; ctx.fillRect(-hw - 400, -hh - 400, ARENA.w + 800, ARENA.h + 800);
-    ctx.fillStyle = FLOOR_TINTS[(g.floorNum - 1) % FLOOR_TINTS.length]; ctx.fillRect(-hw, -hh, ARENA.w, ARENA.h);
-    ctx.strokeStyle = "#ffffff10"; ctx.lineWidth = 0.5; ctx.beginPath();
-    for (let x = -hw; x <= hw + 0.1; x += 25) { ctx.moveTo(x, -hh); ctx.lineTo(x, hh); }
-    for (let y = -hh; y <= hh + 0.1; y += 25) { ctx.moveTo(-hw, y); ctx.lineTo(hw, y); }
+    ctx.fillStyle = "#14110f"; ctx.fillRect(cp.x - 900, cp.y - 700, 1800, 1400);
+    const tint = FLOOR_TINTS[(g.floorNum - 1) % FLOOR_TINTS.length], cw = ARENA.BASE_W, ch = ARENA.BASE_H, has = (dx, dy) => ARENA.cells.some(c => c.dx === dx && c.dy === dy);
+    for (const c of ARENA.cells) { // 칸마다 바닥
+      ctx.fillStyle = tint; ctx.fillRect(c.x - cw / 2, c.y - ch / 2, cw, ch);
+      ctx.strokeStyle = "#ffffff10"; ctx.lineWidth = 0.5; ctx.beginPath();
+      for (let x = c.x - cw / 2; x <= c.x + cw / 2 + 0.1; x += 25) { ctx.moveTo(x, c.y - ch / 2); ctx.lineTo(x, c.y + ch / 2); }
+      for (let y = c.y - ch / 2; y <= c.y + ch / 2 + 0.1; y += 25) { ctx.moveTo(c.x - cw / 2, y); ctx.lineTo(c.x + cw / 2, y); }
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "#6a5a50"; ctx.lineWidth = 3; ctx.beginPath(); // 바깥 벽: 이웃 칸이 없는 쪽만
+    for (const c of ARENA.cells) {
+      const l = c.x - cw / 2, r = c.x + cw / 2, b = c.y - ch / 2, t = c.y + ch / 2;
+      if (!has(c.dx, c.dy + 1)) { ctx.moveTo(l, t); ctx.lineTo(r, t); }
+      if (!has(c.dx, c.dy - 1)) { ctx.moveTo(l, b); ctx.lineTo(r, b); }
+      if (!has(c.dx + 1, c.dy)) { ctx.moveTo(r, b); ctx.lineTo(r, t); }
+      if (!has(c.dx - 1, c.dy)) { ctx.moveTo(l, b); ctx.lineTo(l, t); }
+    }
     ctx.stroke();
-    ctx.strokeStyle = "#6a5a50"; ctx.lineWidth = 3; ctx.strokeRect(-hw, -hh, ARENA.w, ARENA.h);
     if (!g.cur) return;
     for (const [d, room] of Object.entries(g.cur.nb)) { // 문
       const [x, y] = doorPos(d), horiz = d === "N" || d === "S";
@@ -59,21 +69,26 @@ class MinimapRenderer extends Renderer {
   render(ctx, camera) {
     const g = this.game; if (!g.map) return;
     const m = camera.viewMatrix; ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
-    const C = 9, seen = [];
+    const C = 9, seen = [], cp = camera.transform.position;
     const compass = g.heroes.some(h => h.stats.compass); // 나침반: 층 전체 공개
     for (const r of g.map.list) if (compass || r.visited || Object.values(r.nb).some(o => o.visited)) seen.push(r);
     if (!seen.length) return;
-    const xs = seen.map(r => r.x), ys = seen.map(r => r.y);
+    const cells = seen.flatMap(r => r.cells.map(([dx, dy]) => [r.x + dx, r.y + dy]));
+    const xs = cells.map(c => c[0]), ys = cells.map(c => c[1]);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const ox = ARENA.w / 2 - 46, oy = ARENA.h / 2 - 30;
+    const ox = cp.x + camera.viewWidth / 2 - 46, oy = cp.y + camera.viewHeight / 2 - 30; // 화면 오른쪽 위
     ctx.globalAlpha = 0.85;
     for (const r of seen) {
-      const x = ox + (r.x - cx) * C, y = oy + (r.y - cy) * C, col = ROOM_COLORS[r.type];
+      const col = ROOM_COLORS[r.type], big = r.cells.length > 1;
+      for (const [dx, dy] of r.cells) {
+        const x = ox + (r.x + dx - cx) * C, y = oy + (r.y + dy - cy) * C, sz = big ? C : 7;
+        ctx.fillStyle = r.visited ? col : "#3a3a3a"; ctx.fillRect(x - sz / 2, y - sz / 2, sz, sz);
+        if (!r.visited) { ctx.strokeStyle = col; ctx.lineWidth = 0.8; ctx.strokeRect(x - sz / 2, y - sz / 2, sz, sz); }
+        if (r === g.cur) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.2; ctx.strokeRect(x - sz / 2 - 0.5, y - sz / 2 - 0.5, sz + 1, sz + 1); }
+      }
+      const x = ox + (r.x - cx) * C, y = oy + (r.y - cy) * C;
       for (const [d, o] of Object.entries(r.nb)) if (seen.includes(o) && (d === "N" || d === "E")) { ctx.fillStyle = "#ffffff55"; ctx.fillRect(Math.min(x, ox + (o.x - cx) * C) - 1, Math.min(y, oy + (o.y - cy) * C) - 1, d === "E" ? C : 2, d === "N" ? C : 2); }
-      const sz = r.big ? 9 : 7; ctx.fillStyle = r.visited ? col : "#3a3a3a"; ctx.fillRect(x - sz / 2, y - sz / 2, sz, sz);
-      if (!r.visited) { ctx.strokeStyle = col; ctx.lineWidth = 0.8; ctx.strokeRect(x - sz / 2, y - sz / 2, sz, sz); }
-      if (r === g.cur) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.4; ctx.strokeRect(x - sz / 2 - 1, y - sz / 2 - 1, sz + 2, sz + 2); }
-      else if (r.visited && !r.cleared) { ctx.fillStyle = "#0008"; ctx.fillRect(x - 1, y - 1, 2, 2); }
+      if (r !== g.cur && r.visited && !r.cleared) { ctx.fillStyle = "#0008"; ctx.fillRect(x - 1, y - 1, 2, 2); }
     }
     ctx.globalAlpha = 1;
   }

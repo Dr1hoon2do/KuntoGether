@@ -15,6 +15,8 @@ class Game extends Component {
     this.arena = App.create("arena").addComponent(new ArenaRenderer(this, ARENA.w, ARENA.h));
     App.create("minimap").addComponent(new MinimapRenderer(this));
     this.fx = App.create("fx").addComponent(new ParticleSystem({ capacity: 2048 }));
+    // 카메라: 배율은 항상 같고, 플레이어들을 따라간다 (큰 방에서 화면 밖으로 멀리 나간 플레이어는 그냥 안 보인다)
+    this.camTarget = App.create("camtarget"); this.camFollow = this.cam.gameObject.addComponent(new CameraFollow({ target: this.camTarget.transform, smoothing: 7 }));
     this._buildHud();
     Events.on("enemy.killed", e => {
       this.cam.shake(e.enemy.boss ? 6 : 0.8, e.enemy.boss ? 0.6 : 0.08);
@@ -153,22 +155,25 @@ class Game extends Component {
   }
   _leaveRoom() {
     this.cur.items = this.pickups.filter(p => !p.gameObject.isDestroyed).map(p => p.data());
-    this.cur.obs = this.obstacles.filter(o => !o.dead).map(o => o.data()); // 부서진 지형은 그대로 부서진 채로 남는다
+    this.cur.obs = this.obstacles.filter(o => !o.dead && o.kind !== "void").map(o => o.data()); // 부서진 지형은 그대로 부서진 채로 남는다
     this._clearObjects();
   }
   enterRoom(room, dir) {
     if (this.cur) { this._leaveRoom(); this._fadeIn(); SFX.play("door"); }
     this.cur = room; room.visited = true; this.doorHold = 0; this.stairsHold = 0; this.state = "explore";
-    const bigK = room.big ? ARENA.BIG : 1; ARENA.w = ARENA.BASE_W * bigK; ARENA.h = ARENA.BASE_H * bigK; this.cam.setBaseView(ARENA.w, ARENA.h); // 큰 방은 화면을 넓게
+    applyGeo(room); // 방 모양(1~4칸)과 크기. 카메라 배율은 그대로
+    const hw0 = ARENA.w / 2, hh0 = ARENA.h / 2; this.camFollow.bounds = { minX: -hw0, maxX: hw0, minY: -hh0, maxY: hh0 };
     if (room.obs === null) room.obs = generateObstacles(room);
     for (const d of room.obs) this._makeObstacle(d);
-    const hw = ARENA.w / 2, hh = ARENA.h / 2, n = this.heroes.length, side = dir ? OPP[dir] : "S";
-    this.heroes.forEach((h, i) => {
+    for (const v of ARENA.voids) this._makeObstacle({ kind: "void", x: v.x, y: v.y, w: ARENA.BASE_W, h: ARENA.BASE_H, hp: 999 }); // L자 방의 빈 칸
+    const n = this.heroes.length, side = dir ? OPP[dir] : "S", [dx0, dy0] = doorPos(side);
+    this.heroes.forEach((h, i) => { // 들어온 문 앞에 모여서 시작
       const gap = Math.min(20, 150 / Math.max(1, n)), off = (i - (n - 1) / 2) * gap;
-      const [x, y] = side === "S" ? [off, -hh + 24] : side === "N" ? [off, hh - 24] : side === "W" ? [-hw + 24, off] : [hw - 24, off];
+      const [x, y] = side === "S" ? [dx0 + off, dy0 + 24] : side === "N" ? [dx0 + off, dy0 - 24] : side === "W" ? [dx0 + 24, dy0 + off] : [dx0 - 24, dy0 + off];
       h.transform.setPosition(x, y); h.invuln = Math.max(h.invuln, 1.2 + h.stats.entryInvuln); h.swing = null; h.echoes = []; h.cd = 0; h.kx = h.ky = 0;
     });
-    this.introTimer = 2.2; this.introText = `${this.floorNum}층 — ${ROOM_NAMES[room.type]}${room.big ? " (큰 방)" : ""}`;
+    this._updateCamera(0, true);
+    this.introTimer = 2.2; this.introText = `${this.floorNum}층 — ${ROOM_NAMES[room.type]}${room.big ? ` (큰 방 ${room.cells.length}칸)` : ""}`;
     if (!room.spawned) { room.spawned = true; this._populate(room); }
     else {
       for (const d of room.items) this._makePickup(d);
@@ -197,8 +202,8 @@ class Game extends Component {
     const f = this.floorNum, np = this._np(), pf = 0.6 + 0.4 * np;
     let normals, elites = 0;
     if (elite) { elites = Math.min(5, 1 + Math.ceil(np / 2)) + (f >= 4 ? 1 : 0); normals = Math.round((2 + f * 0.4) * pf * 0.6); }
-    else normals = Math.min(46, Math.round((2.5 + f * 0.7 + Math.random() * 1.5) * pf * (this.cur.big ? 1.6 : 1)));
-    if (elite && this.cur.big) { elites += 1; normals = Math.round(normals * 1.5); }
+    else normals = Math.min(60, Math.round((2.5 + f * 0.7 + Math.random() * 1.5) * pf * Math.pow(this.cur.cells.length, 0.9)));
+    if (elite && this.cur.big) elites += this.cur.cells.length - 1;
     const total = normals + elites;
     for (let i = 0; i < total; i++) { const [x, y] = this._spawnPos(); this.spawnEnemy(pickEnemyType(f), x, y, { delay: 0.7 + Math.min(1.8, i * 0.12), elite: i < elites }); }
   }
@@ -334,8 +339,17 @@ class Game extends Component {
     }
     const now = performance.now();
     for (const h of this.heroes) if (h.conn && now - h.lastMsg > 600) Object.assign(h.input, { mx: 0, my: 0, ax: 0, ay: 0, atk: 0, dash: 0, act: 0 });
+    this._updateCamera(dt, false);
     this._sendStatus(dt);
     this._updateHud();
+  }
+  // 모든 플레이어가 보이도록 가운데를 잡는다 (넘치면 가운데에 맞추고 멀리 있는 플레이어는 화면 밖). 방 경계 밖은 안 보여 준다.
+  _updateCamera(dt, snap) {
+    const hs = this.heroes.filter(h => h.alive); const list = hs.length ? hs : this.heroes; if (!list.length) return;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const h of list) { const p = h.transform.position; x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+    this.camTarget.transform.setPosition((x0 + x1) / 2, (y0 + y1) / 2);
+    if (snap) this.camFollow.snap();
   }
   _updateDoors(dt) {
     const alive = this.heroes.filter(h => h.alive); if (!alive.length) return;

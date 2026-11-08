@@ -329,7 +329,7 @@ class Enemy extends Component {
     vx += this.kx; vy += this.ky; this.kx *= Math.max(0, 1 - 8 * dt); this.ky *= Math.max(0, 1 - 8 * dt);
     const q = this.transform.position; // 순간이동 등으로 이번 프레임에 위치가 바뀌었을 수 있으니 다시 읽는다
     let nx = q.x + vx * dt, ny = q.y + vy * dt;
-    if (this.radius <= 11 && g.obstacles.length) { // 지형지물에 막힌다 (덩치 큰 보스는 무시). 막히면 잠깐 옆으로 돌아간다
+    if (g.obstacles.length) { // 지형지물에 막힌다. 막히면 잠깐 옆으로 돌아간다
       const [px, py, blocked] = g.pushOut(nx, ny, this.radius);
       if (blocked && (vx || vy)) { this.avoidT = 0.6; if (!this.avoidSign) this.avoidSign = Math.random() < 0.5 ? 1 : -1; }
       nx = px; ny = py;
