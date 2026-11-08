@@ -1,22 +1,24 @@
-// 방 진행(전투 → 보상 → 포털 → 다음 방), 무기·아이템 드랍, HUD, 폰 접속 처리
+// 던전 진행: 층 → 방(문으로 이동) → 전투/보물/상점/보스, 아이템·골드, HUD, 폰 접속 처리
 class Game extends Component {
   constructor(App) {
     super();
     this.App = App; this.cam = App.camera;
     this.heroes = []; this.enemies = []; this.projs = []; this.pickups = []; this.conns = new Map();
-    this.state = "fight"; this.room = 0; this.nextId = 0; this.overTimer = 0; this.introTimer = 0;
-    this.portal = null; this.portalT = 0;
+    this.floorNum = 1; this.map = null; this.cur = null; this.state = "explore"; // explore | fight | over | victory
+    this.nextId = 0; this.overTimer = 0; this.introTimer = 0; this.introText = "";
+    this.doorHold = 0; this.stairsHold = 0; this.stairsGO = null; this.toastText = ""; this.toastT = 0;
   }
   awake() {
     const App = this.App;
-    this.arena = App.create("arena").addComponent(new ArenaRenderer(ARENA_W, ARENA_H));
+    this.arena = App.create("arena").addComponent(new ArenaRenderer(this, ARENA_W, ARENA_H));
+    App.create("minimap").addComponent(new MinimapRenderer(this));
     this.fx = App.create("fx").addComponent(new ParticleSystem({ capacity: 2048 }));
     this._buildHud();
     Events.on("enemy.killed", e => {
-      this.cam.shake(e.enemy.type === "boss" ? 5 : 0.8, e.enemy.type === "boss" ? 0.5 : 0.08);
-      if (Math.random() < 0.07) this.spawnHeart(e.enemy.transform.position.x, e.enemy.transform.position.y);
+      this.cam.shake(e.enemy.boss ? 6 : 0.8, e.enemy.boss ? 0.6 : 0.08);
+      const by = e.by; if (by && by.stats.lifesteal && Math.random() < by.stats.lifesteal) by.heal(1);
     }, { owner: this });
-    this.startRoom(1);
+    this.startRun();
   }
 
   // ---------- 생성 도우미 ----------
@@ -24,106 +26,176 @@ class Game extends Component {
     const go = this.App.create("slash"), p = hero.transform.position, color = TIERS[hero.weapon.tier].color;
     go.transform.setPosition(p.x, p.y); go.transform.rotation = dir;
     let t = 0; const dur = w.dur, half = (w.arc * Math.PI / 180) / 2;
-    const rend = go.addComponent(new DrawRenderer(ctx => {
+    go.addComponent(new DrawRenderer(ctx => {
       const k = Math.min(1, t / dur); ctx.globalAlpha = 1 - k * k;
       ctx.fillStyle = color; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.lineCap = "round";
-      if (w.kind === "thrust") { // 창: 앞으로 찌르는 선
+      if (w.kind === "thrust") {
         const len = w.range * Math.min(1, k * 2.5 + 0.3);
         ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(len, 0); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(len + 5, 0); ctx.lineTo(len - 3, 3); ctx.lineTo(len - 3, -3); ctx.closePath(); ctx.fill();
       } else {
         const sweep = w.arc >= 360 ? Math.PI * 2 : half * 2, start = w.arc >= 360 ? 0 : -half, cur = start + sweep * Math.min(1, k * 1.6);
         ctx.globalAlpha *= 0.55; ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, w.range, start, cur); ctx.closePath(); ctx.fill();
-        ctx.globalAlpha = (1 - k * k); ctx.beginPath(); ctx.arc(0, 0, w.range, start, cur); ctx.stroke();
+        ctx.globalAlpha = 1 - k * k; ctx.beginPath(); ctx.arc(0, 0, w.range, start, cur); ctx.stroke();
       }
     }, w.range + 10, { order: 8 }));
     go.addComponent(new (class extends Component { update(dt) { t += dt; go.transform.setPosition(hero.transform.position.x, hero.transform.position.y); if (t > dur) go.destroy(); } })());
   }
-  spawnProj(x, y, angle, speed, dmg, fromPlayer) {
+  spawnProj(x, y, angle, speed, dmg, fromPlayer, opts) {
+    if (!fromPlayer && this.projs.length >= BALANCE.maxEnemyProjectiles) return;
     const go = this.App.create("proj"); go.transform.setPosition(x, y);
-    const pr = go.addComponent(new Projectile(this, angle, speed, dmg, fromPlayer)); pr.setup();
+    const pr = go.addComponent(new Projectile(this, angle, speed, dmg, fromPlayer, opts)); pr.setup();
+    if (opts && opts.owner) pr.owner = opts.owner;
     this.projs.push(pr);
   }
-  spawnHeart(x, y) {
-    const go = this.App.create("heart"); go.transform.setPosition(x, y);
-    const pk = go.addComponent(new Pickup(this, { type: "heart" })); pk.setup(); this.pickups.push(pk);
-  }
-  spawnWeaponPickup(x, y, weapon) {
-    const go = this.App.create("weapon"); go.transform.setPosition(x, y);
-    const pk = go.addComponent(new Pickup(this, { type: "weapon", weapon })); pk.setup(); this.pickups.push(pk);
-  }
-  spawnEnemy(type, x, y, hpMult, delay) {
+  spawnEnemy(type, x, y, opts) {
     const go = this.App.create("enemy"); go.transform.setPosition(x, y);
-    const e = go.addComponent(new Enemy(this, type, hpMult, delay)); e.setup(); this.enemies.push(e);
+    const e = go.addComponent(new Enemy(this, type, opts)); e.setup(); this.enemies.push(e); return e;
+  }
+  _makePickup(d) {
+    const go = this.App.create("pickup_" + d.type); go.transform.setPosition(d.x, d.y);
+    const pk = go.addComponent(new Pickup(this, d)); pk.setup(); this.pickups.push(pk); return pk;
+  }
+  spawnCoin(x, y, value) { return this._makePickup({ type: "coin", value, x: x + (Math.random() - 0.5) * 8, y: y + (Math.random() - 0.5) * 8 }); }
+  spawnHeart(x, y, price = 0) { return this._makePickup({ type: "heart", price, x, y }); }
+  spawnWeaponPickup(x, y, weapon, price = 0, lock = 0.8) { return this._makePickup({ type: "weapon", weapon, price, x, y, lock }); }
+  spawnItemPickup(x, y, id, price = 0) { return this._makePickup({ type: "item", id, price, x, y }); }
+  toast(text, secs = 2.5) { this.toastText = text; this.toastT = secs; }
+  // n개를 가로로(6개 넘으면 두 줄) 가지런히 놓을 자리
+  _layout(n, cy = 0) {
+    const row = (cnt, y) => Array.from({ length: cnt }, (_, i) => ({ x: (i - (cnt - 1) / 2) * 42, y }));
+    if (n <= 5) return row(n, cy);
+    const top = Math.ceil(n / 2); return [...row(top, cy + 20), ...row(n - top, cy - 20)];
   }
 
-  // ---------- 방 진행 ----------
-  startRoom(n) {
-    this.room = n; this.state = "fight"; this.introTimer = 2.2; this.arena.locked = true;
+  // ---------- 런·층·방 ----------
+  startRun() {
+    for (const h of this.heroes) { h.resetRun(); h.alive = true; h.invuln = 0; }
+    this.floorNum = 1; this.startFloor();
+  }
+  startFloor() {
+    this._clearObjects(); this.cur = null; this.map = generateFloor(this.floorNum);
+    this.enterRoom(this.map.start, null);
+    this.toast(`${this.floorNum}층 도착`, 2.5);
+  }
+  _clearObjects() {
     for (const o of [...this.enemies, ...this.projs, ...this.pickups]) o.gameObject.destroy();
     this.enemies = []; this.projs = []; this.pickups = [];
-    if (this.portal) { this.portal.destroy(); this.portal = null; }
-    const np = Math.max(1, this.heroes.length);
+    if (this.stairsGO) { this.stairsGO.destroy(); this.stairsGO = null; }
+  }
+  _leaveRoom() {
+    this.cur.items = this.pickups.filter(p => !p.gameObject.isDestroyed).map(p => p.data());
+    this._clearObjects();
+  }
+  enterRoom(room, dir) {
+    if (this.cur) this._leaveRoom();
+    this.cur = room; room.visited = true; this.doorHold = 0; this.stairsHold = 0; this.state = "explore";
+    const hw = ARENA_W / 2, hh = ARENA_H / 2, n = this.heroes.length, side = dir ? OPP[dir] : "S";
     this.heroes.forEach((h, i) => {
-      h.transform.setPosition((i - (np - 1) / 2) * 22, -ARENA_H / 2 + 25);
-      if (!h.alive) h.revive(3);
-      h.cd = 0; h.swing = null;
+      const gap = Math.min(20, 150 / Math.max(1, n)), off = (i - (n - 1) / 2) * gap;
+      const [x, y] = side === "S" ? [off, -hh + 24] : side === "N" ? [off, hh - 24] : side === "W" ? [-hw + 24, off] : [hw - 24, off];
+      h.transform.setPosition(x, y); h.invuln = Math.max(h.invuln, 1.2); h.swing = null; h.cd = 0; h.kx = h.ky = 0;
     });
-    const hpMult = (1 + 0.15 * (n - 1)) * (0.7 + 0.3 * np);
-    const spawnAt = () => {
-      for (let tries = 0; tries < 20; tries++) {
-        const x = (Math.random() * 2 - 1) * (ARENA_W / 2 - 25), y = (Math.random() * 2 - 1) * (ARENA_H / 2 - 25);
-        if (this.heroes.every(h => Math.hypot(h.transform.position.x - x, h.transform.position.y - y) > 70)) return [x, y];
-      }
-      return [0, ARENA_H / 2 - 30];
-    };
-    const boss = n % 5 === 0;
-    const count = Math.min(34, Math.round((3 + n * 0.9) * (0.6 + 0.4 * np)));
-    const pool = [["grunt", 10]];
-    if (n >= 2) pool.push(["runner", 5]);
-    if (n >= 3) pool.push(["shooter", 4]);
-    if (n >= 4) pool.push(["tank", 2]);
-    const total = pool.reduce((a, p) => a + p[1], 0);
-    const pick = () => { let r = Math.random() * total; for (const [t, w] of pool) { if ((r -= w) < 0) return t; } return "grunt"; };
-    if (boss) { const [x, y] = [0, ARENA_H / 2 - 40]; this.spawnEnemy("boss", x, y, hpMult * (1 + (n / 5 - 1) * 0.5), 1.2); }
-    const normal = boss ? Math.round(count * 0.5) : count;
-    for (let i = 0; i < normal; i++) { const [x, y] = spawnAt(); this.spawnEnemy(pick(), x, y, hpMult, 0.7 + i * 0.12); }
+    this.introTimer = 2.2; this.introText = `${this.floorNum}층 — ${ROOM_NAMES[room.type]}`;
+    if (!room.spawned) { room.spawned = true; this._populate(room); }
+    else {
+      for (const d of room.items) this._makePickup(d);
+      room.items = [];
+      if (room.type === "boss" && room.cleared && this.floorNum < MAX_FLOOR) this._makeStairs();
+    }
+    this.state = room.cleared ? "explore" : "fight";
+  }
+  _np() { return Math.max(1, this.heroes.length); }
+  _populate(room) {
+    const np = this._np();
+    if (room.type === "normal") this._spawnWave(false);
+    else if (room.type === "elite") this._spawnWave(true);
+    else if (room.type === "boss") this._spawnBoss();
+    else if (room.type === "treasure") { room.cleared = true; this._stockTreasure(np); }
+    else if (room.type === "shop") { room.cleared = true; this._stockShop(np); }
+  }
+  _spawnPos() {
+    for (let i = 0; i < 25; i++) {
+      const x = (Math.random() * 2 - 1) * (ARENA_W / 2 - 25), y = (Math.random() * 2 - 1) * (ARENA_H / 2 - 25);
+      if (this.heroes.every(h => Math.hypot(h.transform.position.x - x, h.transform.position.y - y) > 70)) return [x, y];
+    }
+    return [0, 0];
+  }
+  _spawnWave(elite) {
+    const f = this.floorNum, np = this._np(), pf = 0.6 + 0.4 * np;
+    let normals, elites = 0;
+    if (elite) { elites = Math.min(5, 1 + Math.ceil(np / 2)) + (f >= 4 ? 1 : 0); normals = Math.round((2 + f * 0.4) * pf * 0.6); }
+    else normals = Math.min(30, Math.round((2.5 + f * 0.7 + Math.random() * 1.5) * pf));
+    const total = normals + elites;
+    for (let i = 0; i < total; i++) { const [x, y] = this._spawnPos(); this.spawnEnemy(pickEnemyType(f), x, y, { delay: 0.7 + Math.min(1.8, i * 0.12), elite: i < elites }); }
+  }
+  _spawnBoss() {
+    const [x, y] = [0, ARENA_H / 2 - 50];
+    this.spawnEnemy(bossForFloor(this.floorNum), x, y, { delay: 1.3 });
+  }
+  _heldItems() { return new Set(this.heroes.flatMap(h => h.items)); }
+  _stockTreasure(np) {
+    const n = Math.min(8, np + 1), taken = this._heldItems(), pos = this._layout(n);
+    const items = n === 1 ? 1 : Math.min(n - 1, Math.max(1, Math.round(n * 0.6))); // 패시브 약 60%, 나머지는 무기 (둘 다 최소 1개)
+    for (let i = 0; i < n; i++) {
+      if (i < items) { const id = randomItemId(taken); taken.add(id); this.spawnItemPickup(pos[i].x, pos[i].y, id); }
+      else this.spawnWeaponPickup(pos[i].x, pos[i].y, randomWeapon(this.floorNum + 4));
+    }
+  }
+  _stockShop(np) {
+    const n = Math.min(8, np + 3), taken = this._heldItems(), pos = this._layout(n);
+    const hearts = np >= 3 ? 2 : 1, items = Math.ceil((n - hearts) * 0.55);
+    for (let i = 0; i < n; i++) {
+      const p = pos[i];
+      if (i < hearts) this.spawnHeart(p.x, p.y, 6);
+      else if (i < hearts + items) { const id = randomItemId(taken); taken.add(id); this.spawnItemPickup(p.x, p.y, id, ITEMS[id].price); }
+      else { const w = randomWeapon(this.floorNum + 2); this.spawnWeaponPickup(p.x, p.y, w, weaponPrice(w)); }
+    }
   }
   clearRoom() {
-    this.state = "clear"; this.arena.locked = false; this.portalT = 0;
-    const np = this.heroes.length, boss = this.room % 5 === 0;
-    const count = Math.min(6, Math.max(2, np + 1));
-    for (let i = 0; i < count; i++) this.spawnWeaponPickup((i - (count - 1) / 2) * 34, -5, randomWeapon(this.room, boss ? 1 : 0));
-    this.spawnHeart(-60, -25); if (np >= 3) this.spawnHeart(60, -25);
+    const room = this.cur, np = this._np(), f = this.floorNum;
+    room.cleared = true; this.state = "explore";
     for (const h of this.heroes) if (!h.alive) h.revive(3);
-    const go = this.App.create("portal"); go.transform.setPosition(0, ARENA_H / 2 - 32);
+    const rand = (a, b) => a + Math.random() * (b - a);
+    if (room.type === "normal") {
+      if (Math.random() < 0.55) this.spawnHeart(rand(-40, 40), rand(-20, 20));
+      if (Math.random() < 0.3) this.spawnCoin(rand(-40, 40), rand(-20, 20), 2 + Math.floor(Math.random() * 3));
+    } else if (room.type === "elite") {
+      const nw = Math.ceil(np / 2), pos = this._layout(nw, -10);
+      for (let i = 0; i < nw; i++) this.spawnWeaponPickup(pos[i].x, pos[i].y, randomWeapon(f + 4, 1));
+      for (let i = 0; i < 3; i++) this.spawnCoin(rand(-40, 40), rand(-40, 0), 3);
+      this.spawnHeart(0, 30); this.toast("엘리트 격파! 보상이 나왔다", 2.5);
+    } else if (room.type === "boss") {
+      for (let i = 0; i < 4; i++) this.spawnCoin(rand(-50, 50), rand(-30, 0), 3 + f);
+      this.spawnHeart(-45, 25); if (np >= 3) this.spawnHeart(45, 25);
+      const n = Math.max(2, np), taken = this._heldItems(), pos = this._layout(n, -25);
+      for (let i = 0; i < n; i++) { const id = randomItemId(taken); taken.add(id); this.spawnItemPickup(pos[i].x, pos[i].y, id); }
+      if (f >= MAX_FLOOR) { this.state = "victory"; this.overTimer = 14; this.cam.shake(8, 1); this.toast("마왕을 쓰러뜨렸다!", 4); }
+      else { this._makeStairs(); this.toast("보스 격파! 아이템을 챙기고 계단으로", 3); }
+    }
+  }
+  _makeStairs() {
+    const go = this.App.create("stairs"); go.transform.setPosition(0, 48);
     go.addComponent(new DrawRenderer(ctx => {
-      const t = performance.now() / 1000, r = 13 + Math.sin(t * 4) * 1.5;
+      const t = performance.now() / 1000, r = 13 + Math.sin(t * 4) * 1.2;
       ctx.strokeStyle = "#80deea"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.stroke();
-      ctx.fillStyle = "#4dd0e1"; ctx.globalAlpha = 0.25 + this.portalT * 0.5; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
-      ctx.globalAlpha = 1; ctx.scale(1, -1); ctx.fillStyle = "#fff"; ctx.font = "6px monospace"; ctx.textAlign = "center"; ctx.fillText("다음 방", 0, 22);
+      ctx.fillStyle = "#4dd0e1"; ctx.globalAlpha = 0.25 + this.stairsHold * 0.5; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1; ctx.scale(1, -1); ctx.fillStyle = "#fff"; ctx.font = "6px monospace"; ctx.textAlign = "center"; ctx.fillText("▼ 다음 층", 0, 22);
     }, 30, { order: 1 }));
-    this.portal = go;
-    Events.emit("room.cleared", { room: this.room });
+    this.stairsGO = go;
   }
-  gameOver() { this.state = "over"; this.overTimer = 6; }
-  restart() {
-    for (const h of this.heroes) { h.weapon = { id: "sword", tier: 0 }; h.kills = 0; h.hp = h.maxHp; h.alive = true; h.invuln = 0; }
-    this.startRoom(1);
-  }
+  nextFloor() { this.floorNum++; this.startFloor(); }
 
   // ---------- 플레이어 ----------
   addHero(keyboard = false) {
     const id = this.nextId++;
     const go = this.App.create("hero" + id);
-    go.transform.setPosition((Math.random() - 0.5) * 40, -ARENA_H / 2 + 25);
+    go.transform.setPosition((Math.random() - 0.5) * 40, -ARENA_H / 2 + 24);
     const h = go.addComponent(new Hero(this, id)); h.setup(); h.keyboard = keyboard;
     this.heroes.push(h);
-    if (this.state === "clear") h.revive(h.maxHp);
     return h;
   }
   removeHero(h) { h.gameObject.destroy(); this.heroes = this.heroes.filter(x => x !== h); }
-
   _keyboard() {
     if (Input.getKeyDown("KeyK") && !this.heroes.some(h => h.keyboard)) this.addHero(true);
     const h = this.heroes.find(x => x.keyboard); if (!h) return;
@@ -136,22 +208,33 @@ class Game extends Component {
     this.enemies = this.enemies.filter(e => !e.gameObject.isDestroyed);
     this.projs = this.projs.filter(p => !p.gameObject.isDestroyed);
     this.pickups = this.pickups.filter(p => !p.gameObject.isDestroyed);
-    this.introTimer -= dt;
-    if (this.heroes.length) {
+    this.introTimer -= dt; this.toastT -= dt;
+    if (this.heroes.length && this.cur) {
       if (this.state === "fight") {
         if (this.enemies.length === 0) this.clearRoom();
-        else if (this.heroes.every(h => !h.alive)) this.gameOver();
-      } else if (this.state === "clear") this._updatePortal(dt);
-      else if (this.state === "over") { this.overTimer -= dt; if (this.overTimer <= 0) this.restart(); }
+        else if (this.heroes.every(h => !h.alive)) { this.state = "over"; this.overTimer = 6; }
+      } else if (this.state === "explore") { this._updateDoors(dt); this._updateStairs(dt); }
+      else { this.overTimer -= dt; if (this.overTimer <= 0) this.startRun(); } // over | victory
     }
     this._sendStatus(dt);
     this._updateHud();
   }
-  _updatePortal(dt) {
+  _updateDoors(dt) {
     const alive = this.heroes.filter(h => h.alive); if (!alive.length) return;
-    const inside = alive.filter(h => Math.hypot(h.transform.position.x, h.transform.position.y - (ARENA_H / 2 - 32)) < 16).length;
-    if (inside >= Math.ceil(alive.length / 2)) this.portalT += dt / 1.5; else this.portalT = Math.max(0, this.portalT - dt);
-    if (this.portalT >= 1) this.startRoom(this.room + 1);
+    let best = null, bc = 0;
+    for (const d of Object.keys(this.cur.nb)) {
+      const [dx, dy] = DOOR_POS[d], c = alive.filter(h => Math.hypot(h.transform.position.x - dx, h.transform.position.y - dy) < 17).length;
+      if (c > bc) { bc = c; best = d; }
+    }
+    if (best && bc >= Math.ceil(alive.length / 2)) { this.doorHold += dt / 0.6; if (this.doorHold >= 1) this.enterRoom(this.cur.nb[best], best); }
+    else this.doorHold = Math.max(0, this.doorHold - dt * 2);
+  }
+  _updateStairs(dt) {
+    if (!this.stairsGO) return;
+    const alive = this.heroes.filter(h => h.alive); if (!alive.length) return;
+    const inside = alive.filter(h => Math.hypot(h.transform.position.x, h.transform.position.y - 48) < 17).length;
+    if (inside >= Math.ceil(alive.length / 2)) this.stairsHold += dt / 1.5; else this.stairsHold = Math.max(0, this.stairsHold - dt);
+    if (this.stairsHold >= 1) this.nextFloor();
   }
 
   // ---------- HUD ----------
@@ -162,19 +245,25 @@ class Game extends Component {
   }
   _buildHud() {
     this.hudTop = this._text("top", { fontSize: 9, align: "left", verticalAlign: "top" }, rt => rt.setAnchor(0, 0, 1, 0).setPivot(0, 0).setOffsets(8, 6, 0, 0));
-    this.hudRoom = this._text("room", { fontSize: 8, align: "right", verticalAlign: "top", color: "#9ab" }, rt => rt.setAnchor(0, 0, 1, 0).setPivot(0, 0).setOffsets(0, 6, 8, 0));
+    this.hudRoom = this._text("room", { fontSize: 8, align: "center", verticalAlign: "top", color: "#9ab" }, rt => rt.setAnchor(0, 0, 1, 0).setPivot(0, 0).setOffsets(0, 6, 0, 0));
+    this.hudBoss = this._text("boss", { fontSize: 8, align: "center", verticalAlign: "top", color: "#ff8a80" }, rt => rt.setAnchor(0, 0, 1, 0).setPivot(0, 0).setOffsets(0, 18, 0, 0));
     this.hudCenter = this._text("center", { fontSize: 15, wrap: true }, rt => rt.setAnchor(0, 0, 1, 1).setOffsets(20, 20, 20, 20));
+    this.hudToast = this._text("toast", { fontSize: 8, wrap: true, color: "#ffe082", verticalAlign: "bottom" }, rt => rt.setAnchor(0, 0, 1, 1).setOffsets(20, 0, 20, 26));
     this.hudHeroes = this._text("heroes", { fontSize: 7, align: "left", verticalAlign: "bottom", wrap: true }, rt => rt.setAnchor(0, 0, 1, 1).setOffsets(8, 0, 8, 5));
   }
   _updateHud() {
-    this.hudTop.setText(`ROOM ${this.room}${this.room % 5 === 0 ? "  ★BOSS" : ""}   남은 적 ${this.enemies.length}`);
+    const room = this.cur;
+    this.hudTop.setText(room ? `${this.floorNum}층 · ${ROOM_NAMES[room.type]}${this.state === "fight" ? `   남은 적 ${this.enemies.length}` : ""}` : "");
     this.hudRoom.setText(this.roomCode ? `방 코드 ${this.roomCode}` : "");
-    this.hudHeroes.setText(this.heroes.map(h => `P${h.id + 1} ${h.alive ? "♥".repeat(h.hp) + "♡".repeat(h.maxHp - h.hp) : "💀"} ${weaponLabel(h.weapon)} (${h.kills})`).join("    "));
+    const boss = this.enemies.find(e => e.boss && !e.dead);
+    this.hudBoss.setText(boss ? `☠ ${boss.title}  ${"█".repeat(Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${"░".repeat(20 - Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}` : "");
+    this.hudHeroes.setText(this.heroes.map(h => `P${h.id + 1} ${h.alive ? "♥".repeat(h.hp) + "♡".repeat(h.maxHp - h.hp) : "💀"} ${weaponLabel(h.weapon)} ${h.gold}G ★${h.items.length}`).join("    "));
+    this.hudToast.setText(this.toastT > 0 ? this.toastText : "");
     let c = "";
     if (!this.heroes.length) c = this.roomCode ? `폰으로 접속하세요\n방 코드: ${this.roomCode}\n(키보드: K — WASD 이동, J 공격, L 대시)` : "서버 연결 중...";
-    else if (this.state === "over") c = `GAME OVER\nROOM ${this.room} 도달\n${Math.ceil(this.overTimer)}초 후 재시작`;
-    else if (this.state === "fight" && this.introTimer > 0) c = `ROOM ${this.room}${this.room % 5 === 0 ? "\nBOSS!" : ""}`;
-    else if (this.state === "clear") c = this.introTimer > -3 ? "CLEAR!\n무기 위에 서 있으면 교체 · 포털로 이동" : "";
+    else if (this.state === "over") c = `GAME OVER\n${this.floorNum}층 도달\n${Math.ceil(this.overTimer)}초 후 처음부터`;
+    else if (this.state === "victory") c = `VICTORY!\n던전을 정복했다\n${Math.ceil(this.overTimer)}초 후 새 게임`;
+    else if (this.introTimer > 0) c = this.introText;
     this.hudCenter.setText(c);
   }
 
@@ -210,6 +299,6 @@ class Game extends Component {
   _sendStatus(dt) {
     this._statusCd = (this._statusCd || 0) - dt;
     if (this._statusCd > 0) return; this._statusCd = 0.2;
-    for (const [c, h] of this.conns) if (c.open) c.send({ t: "st", hp: h.hp, maxHp: h.maxHp, alive: h.alive, weapon: weaponLabel(h.weapon), room: this.room, kills: h.kills });
+    for (const [c, h] of this.conns) if (c.open) c.send({ t: "st", hp: h.hp, maxHp: h.maxHp, alive: h.alive, weapon: weaponLabel(h.weapon), floor: this.floorNum, gold: h.gold, items: h.items.length, kills: h.kills });
   }
 }

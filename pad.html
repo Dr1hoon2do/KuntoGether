@@ -111,7 +111,7 @@ else (async () => {
       if (d.t === "welcome") { color = d.color; draw(); }
       else if (d.t === "st") {
         $("hp").textContent = d.alive ? "♥".repeat(d.hp) + "♡".repeat(d.maxHp - d.hp) : "💀 다음 방에서 부활";
-        $("score").textContent = `ROOM ${d.room} · ${d.weapon} · 처치 ${d.kills}`;
+        $("score").textContent = `${d.floor}층 · ${d.weapon} · ${d.gold}G · ★${d.items}`;
         if (prevHp !== null && d.hp < prevHp && navigator.vibrate) navigator.vibrate(120);
         prevHp = d.hp;
       }
