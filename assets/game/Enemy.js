@@ -328,6 +328,12 @@ class Enemy extends Component {
     }
     vx += this.kx; vy += this.ky; this.kx *= Math.max(0, 1 - 8 * dt); this.ky *= Math.max(0, 1 - 8 * dt);
     const q = this.transform.position; // 순간이동 등으로 이번 프레임에 위치가 바뀌었을 수 있으니 다시 읽는다
+    // 거의 못 움직이고 있으면(벽에 막힘) 우회 방향을 반대로 바꿔서 빠져나온다
+    this._chkT = (this._chkT || 0) + dt;
+    if (this._chkT >= 0.6) {
+      if (this._cx !== undefined && target && !this.busy && !stunned && this.speed > 0 && (def.ai === "chase" || def.ai === "zigzag" || !def.ai) && Math.hypot(q.x - this._cx, q.y - this._cy) < this.speed * slow * 0.6 * 0.25) { this.avoidSign = -(this.avoidSign || 1); this.avoidT = 1.4; }
+      this._cx = q.x; this._cy = q.y; this._chkT = 0;
+    }
     let nx = q.x + vx * dt, ny = q.y + vy * dt;
     if (g.obstacles.length) { // 지형지물에 막힌다. 막히면 잠깐 옆으로 돌아간다
       const [px, py, blocked] = g.pushOut(nx, ny, this.radius);
