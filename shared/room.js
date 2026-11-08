@@ -15,5 +15,6 @@ const PEER_OPTIONS = {
     { urls: "stun:global.stun.twilio.com:3478" },
     // PeerJS 라이브러리 기본값에 들어 있는 공용 TURN (개발용, 안정성 보장 없음)
     { urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"], username: "peerjs", credential: "peerjsp" },
+    ...(typeof TURN_SERVERS !== "undefined" ? TURN_SERVERS : []), // shared/turn.js 에 채운 개인 TURN
   ] },
 };
