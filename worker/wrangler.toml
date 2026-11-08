@@ -1,0 +1,10 @@
+# 터미널 배포용 설정 (대시보드에 코드를 붙여넣어 배포한다면 필요 없음)
+# 배포: cd worker && npx wrangler deploy
+# 비밀 변수: npx wrangler secret put TURN_API_TOKEN
+name = "kuntogether-turn"
+main = "turn-worker.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+TURN_KEY_ID = "여기에_TURN_키_ID"
+ALLOWED_ORIGINS = "https://dr1hoon2do.github.io"

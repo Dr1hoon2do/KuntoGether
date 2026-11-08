@@ -76,10 +76,10 @@ function draw() {
 
 // ---------- 연결 ----------
 if (!code) { msg("방 코드가 없습니다.\n처음 화면에서 입력해 주세요."); }
-else {
+else (async () => {
   // 단계별로 상태를 보여 줘서 어디서 막혔는지 알 수 있게 한다
   msg("1/3 서버에 접속 중...");
-  const peer = new Peer(undefined, PEER_OPTIONS);
+  const peer = new Peer(undefined, await getPeerOptions());
   const fail = t => { if (!$("msg").classList.contains("hide")) msg(t); };
   const serverTimer = setTimeout(() => fail("서버에 접속하지 못했어요.\n(PeerJS 서버 연결 실패 — 네트워크/차단 확인)"), 10000);
   peer.on("error", e => msg(e.type === "peer-unavailable" ? "방을 찾을 수 없어요.\n코드를 다시 확인해 주세요." : e.type === "negotiation-failed" ? "TV와 연결 경로를 못 찾았어요.\n(네트워크가 서로 달라 막힌 경우예요 — 같은 와이파이로 다시 시도)" : "에러: " + e.type + "\n" + (e.message || "")));
@@ -118,7 +118,7 @@ else {
     });
     c.on("close", () => { clearInterval(timer); msg("연결이 끊겼어요.\n새로고침하면 다시 접속해요."); });
   });
-}
+})();
 resize();
 </script>
 </body>

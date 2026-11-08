@@ -179,10 +179,11 @@ class Game extends Component {
   }
 
   // ---------- 폰 연결 (PeerJS) ----------
-  startNet() {
+  async startNet() {
+    const options = await getPeerOptions();
     const open = () => {
       const code = makeCode();
-      const peer = new Peer(codeToPeerId(code), PEER_OPTIONS);
+      const peer = new Peer(codeToPeerId(code), options);
       peer.on("open", () => { this.roomCode = code; this.peer = peer; });
       peer.on("error", e => {
         if (e.type === "unavailable-id") { peer.destroy(); open(); }
