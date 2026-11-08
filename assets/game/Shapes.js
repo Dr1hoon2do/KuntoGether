@@ -26,24 +26,23 @@ const DRAW_MATRIX = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 const ROOM_COLORS = { start: "#5c8", normal: "#889", elite: "#fa4", treasure: "#fd3", shop: "#4d8", boss: "#f55" };
 const ROOM_ICONS = { start: "◆", normal: "·", elite: "!", treasure: "★", shop: "$", boss: "☠" };
 const FLOOR_TINTS = ["#2a2420", "#232a28", "#2a2329", "#292a22", "#222a2a", "#2a2222", "#28242c", "#2c2020"];
-const DOOR_POS = { N: [0, ARENA_H / 2], S: [0, -ARENA_H / 2], E: [ARENA_W / 2, 0], W: [-ARENA_W / 2, 0] };
 const DOOR_W = 30;
 class ArenaRenderer extends Renderer {
-  constructor(game, w, h) { super(); this.game = game; this.w = w; this.h = h; this.sortingLayer = "Background"; }
+  constructor(game) { super(); this.game = game; this.sortingLayer = "Background"; }
   render(ctx, camera) {
     const m = camera.viewMatrix, g = this.game;
     ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
-    const hw = this.w / 2, hh = this.h / 2, locked = g.state !== "explore";
-    ctx.fillStyle = "#14110f"; ctx.fillRect(-hw - 400, -hh - 400, this.w + 800, this.h + 800);
-    ctx.fillStyle = FLOOR_TINTS[(g.floorNum - 1) % FLOOR_TINTS.length]; ctx.fillRect(-hw, -hh, this.w, this.h);
+    const hw = ARENA.w / 2, hh = ARENA.h / 2, locked = g.state !== "explore";
+    ctx.fillStyle = "#14110f"; ctx.fillRect(-hw - 400, -hh - 400, ARENA.w + 800, ARENA.h + 800);
+    ctx.fillStyle = FLOOR_TINTS[(g.floorNum - 1) % FLOOR_TINTS.length]; ctx.fillRect(-hw, -hh, ARENA.w, ARENA.h);
     ctx.strokeStyle = "#ffffff10"; ctx.lineWidth = 0.5; ctx.beginPath();
-    for (let x = -hw; x <= hw; x += 25) { ctx.moveTo(x, -hh); ctx.lineTo(x, hh); }
-    for (let y = -hh; y <= hh; y += 25) { ctx.moveTo(-hw, y); ctx.lineTo(hw, y); }
+    for (let x = -hw; x <= hw + 0.1; x += 25) { ctx.moveTo(x, -hh); ctx.lineTo(x, hh); }
+    for (let y = -hh; y <= hh + 0.1; y += 25) { ctx.moveTo(-hw, y); ctx.lineTo(hw, y); }
     ctx.stroke();
-    ctx.strokeStyle = "#6a5a50"; ctx.lineWidth = 3; ctx.strokeRect(-hw, -hh, this.w, this.h);
+    ctx.strokeStyle = "#6a5a50"; ctx.lineWidth = 3; ctx.strokeRect(-hw, -hh, ARENA.w, ARENA.h);
     if (!g.cur) return;
     for (const [d, room] of Object.entries(g.cur.nb)) { // 문
-      const [x, y] = DOOR_POS[d], horiz = d === "N" || d === "S";
+      const [x, y] = doorPos(d), horiz = d === "N" || d === "S";
       ctx.fillStyle = locked ? "#c62828" : "#2e7d32";
       if (horiz) ctx.fillRect(x - DOOR_W / 2, y - 2.5, DOOR_W, 5); else ctx.fillRect(x - 2.5, y - DOOR_W / 2, 5, DOOR_W);
       if (!locked) { ctx.globalAlpha = 0.18 + 0.1 * Math.sin(performance.now() / 300); ctx.fillStyle = ROOM_COLORS[room.type]; ctx.beginPath(); ctx.arc(x, y, 16, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
@@ -66,14 +65,14 @@ class MinimapRenderer extends Renderer {
     if (!seen.length) return;
     const xs = seen.map(r => r.x), ys = seen.map(r => r.y);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const ox = ARENA_W / 2 - 46, oy = ARENA_H / 2 - 30;
+    const ox = ARENA.w / 2 - 46, oy = ARENA.h / 2 - 30;
     ctx.globalAlpha = 0.85;
     for (const r of seen) {
       const x = ox + (r.x - cx) * C, y = oy + (r.y - cy) * C, col = ROOM_COLORS[r.type];
       for (const [d, o] of Object.entries(r.nb)) if (seen.includes(o) && (d === "N" || d === "E")) { ctx.fillStyle = "#ffffff55"; ctx.fillRect(Math.min(x, ox + (o.x - cx) * C) - 1, Math.min(y, oy + (o.y - cy) * C) - 1, d === "E" ? C : 2, d === "N" ? C : 2); }
-      ctx.fillStyle = r.visited ? col : "#3a3a3a"; ctx.fillRect(x - 3.5, y - 3.5, 7, 7);
-      if (!r.visited) { ctx.strokeStyle = col; ctx.lineWidth = 0.8; ctx.strokeRect(x - 3.5, y - 3.5, 7, 7); }
-      if (r === g.cur) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.4; ctx.strokeRect(x - 4.5, y - 4.5, 9, 9); }
+      const sz = r.big ? 9 : 7; ctx.fillStyle = r.visited ? col : "#3a3a3a"; ctx.fillRect(x - sz / 2, y - sz / 2, sz, sz);
+      if (!r.visited) { ctx.strokeStyle = col; ctx.lineWidth = 0.8; ctx.strokeRect(x - sz / 2, y - sz / 2, sz, sz); }
+      if (r === g.cur) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.4; ctx.strokeRect(x - sz / 2 - 1, y - sz / 2 - 1, sz + 2, sz + 2); }
       else if (r.visited && !r.cleared) { ctx.fillStyle = "#0008"; ctx.fillRect(x - 1, y - 1, 2, 2); }
     }
     ctx.globalAlpha = 1;

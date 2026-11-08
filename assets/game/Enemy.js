@@ -311,6 +311,9 @@ class Enemy extends Component {
             break;
           default: vx = Math.cos(a) * sp; vy = Math.sin(a) * sp;
         }
+        if (this.avoidT > 0 && (def.ai === "chase" || def.ai === "zigzag" || !def.ai)) { // 장애물에 막혔을 땐 잠깐 옆으로 돌아간다
+          this.avoidT -= dt; const pa = a + Math.PI / 2 * this.avoidSign; vx += Math.cos(pa) * sp * 0.9; vy += Math.sin(pa) * sp * 0.9;
+        }
         if (!this.ethereal) for (const at of this.atk) {
           at.cd -= dt * this.sc.rate * slow;
           if (at.cd <= 0 && td <= (at.d.range ?? Infinity)) { this._begin(at, a, target); if (this.busy) break; }
@@ -325,13 +328,17 @@ class Enemy extends Component {
     }
     vx += this.kx; vy += this.ky; this.kx *= Math.max(0, 1 - 8 * dt); this.ky *= Math.max(0, 1 - 8 * dt);
     const q = this.transform.position; // 순간이동 등으로 이번 프레임에 위치가 바뀌었을 수 있으니 다시 읽는다
-    this.transform.setPosition(
-      Math.max(-ARENA_W / 2 + this.radius, Math.min(ARENA_W / 2 - this.radius, q.x + vx * dt)),
-      Math.max(-ARENA_H / 2 + this.radius, Math.min(ARENA_H / 2 - this.radius, q.y + vy * dt)));
+    let nx = q.x + vx * dt, ny = q.y + vy * dt;
+    if (this.radius <= 11 && g.obstacles.length) { // 지형지물에 막힌다 (덩치 큰 보스는 무시). 막히면 잠깐 옆으로 돌아간다
+      const [px, py, blocked] = g.pushOut(nx, ny, this.radius);
+      if (blocked && (vx || vy)) { this.avoidT = 0.6; if (!this.avoidSign) this.avoidSign = Math.random() < 0.5 ? 1 : -1; }
+      nx = px; ny = py;
+    }
+    this.transform.setPosition(Math.max(-ARENA.w / 2 + this.radius, Math.min(ARENA.w / 2 - this.radius, nx)), Math.max(-ARENA.h / 2 + this.radius, Math.min(ARENA.h / 2 - this.radius, ny)));
   }
 
   // ---- 공격 패턴 ----
-  _clampPos(x, y, m = 10) { return [Math.max(-ARENA_W / 2 + m, Math.min(ARENA_W / 2 - m, x)), Math.max(-ARENA_H / 2 + m, Math.min(ARENA_H / 2 - m, y))]; }
+  _clampPos(x, y, m = 10) { return [Math.max(-ARENA.w / 2 + m, Math.min(ARENA.w / 2 - m, x)), Math.max(-ARENA.h / 2 + m, Math.min(ARENA.h / 2 - m, y))]; }
   _begin(at, aim, target) {
     const d = at.d, g = this.game, p = this.transform.position, sc = this.sc;
     const dmg = (d.dmg || 1) + sc.dmgAdd, spd = (d.speed || 80) * sc.speed;
@@ -401,7 +408,7 @@ class Enemy extends Component {
     }
     if (b.type === "rain") { // 위에서 쏟아지는 탄
       const interval = 1 / (d.rate * sc.rate); b.acc += dt;
-      while (b.acc >= interval) { b.acc -= interval; g.spawnProj((Math.random() * 2 - 1) * (ARENA_W / 2 - 8), ARENA_H / 2 + 6, -Math.PI / 2 + (Math.random() - 0.5) * 0.2, b.spd, b.dmg, false); }
+      while (b.acc >= interval) { b.acc -= interval; g.spawnProj((Math.random() * 2 - 1) * (ARENA.w / 2 - 8), ARENA.h / 2 + 6, -Math.PI / 2 + (Math.random() - 0.5) * 0.2, b.spd, b.dmg, false); }
       if (b.t <= 0) { b.at.cd = d.cd; this.busy = null; }
       return [Math.cos(aim) * this.speed * 0.4, Math.sin(aim) * this.speed * 0.4];
     }
@@ -475,7 +482,7 @@ class Enemy extends Component {
     SFX.play(this.boss ? "boom" : "die");
     if (this.boss) for (const e of g.enemies) if (e !== this && !e.dead && (e.parent === this || e.guardOf === this)) e.die(null, true); // 보스가 쓰러지면 졸개도 사라진다
     if (def.onDeath && !quiet) for (let i = 0; i < def.onDeath.count; i++) { const a = i * 3.14 + Math.random(); g.spawnEnemy(def.onDeath.spawn, p.x + Math.cos(a) * 8, p.y + Math.sin(a) * 8, { delay: 0.2 }); }
-    const bonus = by && by.stats ? by.stats.coinDrop : 0;
+    const bonus = g.partySum("coinDrop"); // 골드 관련 아이템은 파티 전체에 적용
     if (!this.boss && !quiet && (def.gold || bonus > 0) && (this.elite || Math.random() < ((def.goldChance ?? 0) + bonus) * BALANCE.coinRate)) {
       const [lo, hi] = def.gold || [1, 1], n = (lo + Math.floor(Math.random() * (hi - lo + 1))) * (this.elite ? 2 : 1);
       g.spawnCoin(p.x, p.y, n);
@@ -539,7 +546,18 @@ class Projectile extends Component {
     } else t.setPosition(p.x + this.vx * dt, p.y + this.vy * dt);
     const q = t.position;
     if (this.life <= 0) { if (this.area && this.fromPlayer) this._boom(); else this.gameObject.destroy(); return; }
-    if (!this.bm && (Math.abs(q.x) > ARENA_W / 2 + 10 || Math.abs(q.y) > ARENA_H / 2 + 10)) { if (this.area && this.fromPlayer) this._boom(); else this.gameObject.destroy(); return; }
+    if (!this.bm && (Math.abs(q.x) > ARENA.w / 2 + 10 || Math.abs(q.y) > ARENA.h / 2 + 10)) { if (this.area && this.fromPlayer) this._boom(); else this.gameObject.destroy(); return; }
+    if (!this.orbit && g.obstacles.length && (this.obsCd = (this.obsCd || 0) - dt) <= 0) { // 지형지물에 막힌다 (적 탄은 엄폐물에 막혀 사라지고, 내 탄은 상자·통을 부순다)
+      const o = g.obstacleAt(q.x, q.y, this.radius);
+      if (o) {
+        if (this.fromPlayer) {
+          if (o.destructible) o.damage(Math.max(1, Math.round(this.dmg / 2)), this.owner, !!this.area);
+          if (this.bm) { if (this.bm.phase === "out") { this.bm.phase = "back"; this.hitSet.clear(); } this.obsCd = 0.25; }
+          else if (this.area) { this._boom(); return; }
+          else if (!(this.pierce && o.destructible)) { this.gameObject.destroy(); return; }
+        } else { g.fx.emit(q.x, q.y, { count: 2, colors: ["#ff8a65", "#fff"], speed: [10, 30], life: [0.1, 0.2], size: [1, 1.4], fade: true }); this.gameObject.destroy(); return; }
+      }
+    }
     if (this.fromPlayer) {
       for (const e of g.enemies) {
         if (e.dead || e.spawnDelay > 0 || this.hitSet.has(e)) continue;

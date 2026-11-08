@@ -1,6 +1,8 @@
 // 층 지도 생성. 방은 격자 위에 이어 붙고(고리 없이 가지 모양), 막다른 방에 보스·보물·상점이 놓인다.
 // 방 종류: start / normal / elite / treasure / shop / boss
-const ARENA_W = 400, ARENA_H = 225; // 방(아레나) 크기. 카메라 기준 해상도(main.js)와 같다
+// 방(아레나) 크기. 보통 방은 400x225(카메라 기준 해상도와 같음), 큰 방은 1.5배. 방에 들어갈 때 Game.enterRoom이 바꾼다.
+const ARENA = { w: 400, h: 225, BASE_W: 400, BASE_H: 225, BIG: 1.5 };
+const doorPos = d => ({ N: [0, ARENA.h / 2], S: [0, -ARENA.h / 2], E: [ARENA.w / 2, 0], W: [-ARENA.w / 2, 0] })[d];
 const DIRS = { N: [0, 1], E: [1, 0], S: [0, -1], W: [-1, 0] };
 const OPP = { N: "S", S: "N", E: "W", W: "E" };
 const MAX_FLOOR = 8;            // 마지막 층 (최종 보스)
@@ -9,7 +11,7 @@ const ROOM_NAMES = { start: "시작 방", normal: "일반 방", elite: "엘리�
 
 function generateFloor(f) {
   const key = (x, y) => x + "," + y, rooms = new Map();
-  const add = (x, y, type) => { const r = { x, y, type, visited: false, cleared: false, spawned: false, items: [], nb: {}, dist: 0 }; rooms.set(key(x, y), r); return r; };
+  const add = (x, y, type) => { const r = { x, y, type, visited: false, cleared: false, spawned: false, items: [], obs: null, big: false, nb: {}, dist: 0 }; rooms.set(key(x, y), r); return r; };
   const occ = (x, y) => Object.values(DIRS).filter(([dx, dy]) => rooms.has(key(x + dx, y + dy))).length;
   const entries = Object.entries(DIRS);
   const start = add(0, 0, "start");
@@ -44,6 +46,7 @@ function generateFloor(f) {
   special.slice(1).forEach((t, i) => { if (rest[i]) rest[i].type = t; });
   // 엘리트 방: 시작 방에서 2칸 이상 떨어진 일반 방 중에서
   const elites = f >= 4 ? 2 : 1;
+  if (f >= 2) for (const r of rooms.values()) if (r.type === "normal" && r.dist >= 1 && Math.random() < 0.18) r.big = true; // 가끔 큰 방(일반·엘리트)
   const cands = [...rooms.values()].filter(r => r.type === "normal" && r.dist >= 2).sort(() => Math.random() - 0.5);
   cands.slice(0, elites).forEach(r => { r.type = "elite"; });
   start.cleared = true; start.spawned = true;

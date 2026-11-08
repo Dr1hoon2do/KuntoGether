@@ -44,20 +44,22 @@ let pid = store.get("kg.pid");
 if (!pid) { pid = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)); store.set("kg.pid", pid); }
 let nick = store.get("kg.nick") || "";
 
-// ---------- 조작: 왼쪽 = 이동 스틱, 오른쪽 아무 데나 = 공격(누른 채 드래그하면 그 방향), 오른쪽 아래 버튼 = 대시 ----------
+// ---------- 조작: 왼쪽 = 이동 스틱, 오른쪽 아무 데나 = 공격(누른 채 드래그하면 그 방향), 오른쪽 아래 = 대시, 그 위 = 액티브 아이템 ----------
 // 터치를 id별로 추적하고, 터치 이벤트마다 "지금 실제로 눌려 있는 터치 목록"과 대조해서 떼어진 손가락의 찌꺼기(스틱 고정)를 지운다.
 const cv = $("pad"), g = cv.getContext("2d");
-const touches = new Map(); // id -> { role: move|aim|dash, ox, oy, x, y }
+const touches = new Map(); // id -> { role: move|aim|dash|act, ox, oy, x, y }
+let actInfo = null; // 액티브 아이템 상태 { name, text, ready }
 let color = "#4fc3f7";
 const R = () => Math.max(45, Math.min(80, Math.min(innerWidth, innerHeight) * 0.14));
 const dashBtn = () => ({ x: innerWidth - 70, y: innerHeight - 70, r: 42 });
+const actBtn = () => ({ x: innerWidth - 70, y: innerHeight - 165, r: 38 });
 const hasRole = r => [...touches.values()].some(t => t.role === r);
 function resize() { cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio; g.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0); draw(); }
 addEventListener("resize", resize); addEventListener("orientationchange", () => setTimeout(resize, 200));
 
 function pStart(id, x, y) {
-  const d = dashBtn();
-  let role = Math.hypot(x - d.x, y - d.y) < d.r + 10 ? "dash" : x < innerWidth / 2 ? "move" : "aim";
+  const d = dashBtn(), a = actBtn();
+  let role = Math.hypot(x - d.x, y - d.y) < d.r + 10 ? "dash" : Math.hypot(x - a.x, y - a.y) < a.r + 10 ? "act" : x < innerWidth / 2 ? "move" : "aim";
   if (hasRole(role)) return;
   touches.set(id, { role, ox: x, oy: y, x, y });
 }
@@ -95,7 +97,11 @@ function draw() {
   const d = dashBtn(), dashOn = hasRole("dash");
   g.fillStyle = dashOn ? color + "cc" : color + "44"; g.beginPath(); g.arc(d.x, d.y, d.r, 0, 7); g.fill();
   g.strokeStyle = color; g.lineWidth = 2; g.stroke(); g.fillStyle = "#fff"; g.fillText("대시", d.x, d.y + 5);
-  for (const t of touches.values()) if (t.role !== "dash") {
+  const ab = actBtn(), actOn = hasRole("act"), has = !!actInfo;
+  g.fillStyle = !has ? "#ffffff10" : actOn ? "#ffd54fcc" : actInfo.ready ? "#ffd54f55" : "#ffffff18"; g.beginPath(); g.arc(ab.x, ab.y, ab.r, 0, 7); g.fill();
+  g.strokeStyle = has && actInfo.ready ? "#ffd54f" : "#ffffff40"; g.lineWidth = 2; g.stroke(); g.fillStyle = has ? "#fff" : "#ffffff50"; g.font = "13px sans-serif";
+  g.fillText(has ? "액티브" : "없음", ab.x, ab.y - 2); if (has) { g.font = "11px sans-serif"; g.fillText(actInfo.text.replace(actInfo.name, "").trim() || actInfo.text, ab.x, ab.y + 13); } g.font = "14px sans-serif";
+  for (const t of touches.values()) if (t.role !== "dash" && t.role !== "act") {
     const c = t.role === "aim" ? "#ff8a65" : color, r = R();
     g.strokeStyle = c; g.lineWidth = 2; g.beginPath(); g.arc(t.ox, t.oy, r, 0, 7); g.stroke();
     const l = Math.hypot(t.x - t.ox, t.y - t.oy) || 1, m = Math.min(l, r);
@@ -143,7 +149,7 @@ async function start() {
       c.send({ t: "hello", pid, name: nick });
       sendTimer = setInterval(() => {
         const [mx, my] = vec("move"), [ax, ay] = vec("aim"), now = Date.now();
-        const out = JSON.stringify({ t: "s", mx: +mx.toFixed(2), my: +my.toFixed(2), ax: +ax.toFixed(2), ay: +ay.toFixed(2), atk: hasRole("aim") ? 1 : 0, dash: hasRole("dash") ? 1 : 0 });
+        const out = JSON.stringify({ t: "s", mx: +mx.toFixed(2), my: +my.toFixed(2), ax: +ax.toFixed(2), ay: +ay.toFixed(2), atk: hasRole("aim") ? 1 : 0, dash: hasRole("dash") ? 1 : 0, act: hasRole("act") ? 1 : 0 });
         if (out !== last || now - lastAt > 150) { c.send(JSON.parse(out)); last = out; lastAt = now; } // 바뀌지 않아도 150ms마다 보내서 TV가 "끊김"을 알아챌 수 있게
       }, 33);
     });
@@ -152,9 +158,10 @@ async function start() {
       if (d.t === "welcome") { color = d.color; draw(); }
       else if (d.t === "st") {
         $("hp").textContent = d.alive ? "♥".repeat(d.hp) + "♡".repeat(Math.max(0, d.maxHp - d.hp)) : "💀 보스를 쓰러뜨리면 부활";
-        $("score").textContent = `${d.floor}층 · ${d.weapon} · ${d.gold}G`;
+        $("score").textContent = `${d.floor}층 · ${d.weapon} · 팀 ${d.gold}G`;
+        actInfo = d.act || null; draw();
         const cnt = {}; (d.itemNames || []).forEach(n => cnt[n] = (cnt[n] || 0) + 1);
-        $("items").textContent = Object.entries(cnt).map(([n, c]) => c > 1 ? `${n}×${c}` : n).join(" · ");
+        $("items").textContent = (d.act ? "[액티브] " + d.act.name + "  " : "") + Object.entries(cnt).map(([n, c]) => c > 1 ? `${n}×${c}` : n).join(" · ");
         if (prevHp !== null && d.hp < prevHp && navigator.vibrate) navigator.vibrate(120);
         prevHp = d.hp;
       }
