@@ -1,8 +1,8 @@
-// 바닥 아이템. type: coin(자동 획득·자석) / heart(price 0이면 닿으면 회복, 상점 하트는 구매·stock회) / weapon·item(위에 0.6초 서 있으면 교체·획득, price가 있으면 골드로 구매)
+// 바닥 아이템. type: coin(닿으면 골드, 자석) / heart(price 0이면 닿으면 회복) / weapon·item·상점 하트(가까이 가면 정보만 보이고, 공격(터치)하면 획득·교체·구매)
 class Pickup extends Component {
   constructor(game, item) {
     super();
-    this.game = game; this.item = item; this.lock = item.lock ?? 0.8; this.hold = 0; this.holder = null; this.t = Math.random() * 6; this.near = null;
+    this.game = game; this.item = item; this.lock = item.lock ?? 0.8; this.t = Math.random() * 6; this.near = null;
   }
   _price(h) { const base = this.item.price || 0; return base > 0 && h ? Math.max(1, Math.ceil(base * h.stats.discount)) : base; } // 상점 할인 반영
   data() { const p = this.transform.position; return { ...this.item, x: p.x, y: p.y, lock: 0.8 }; }
@@ -36,7 +36,10 @@ class Pickup extends Component {
     }
     if (it.type === "heart" && it.stock) this._label(ctx, "x" + it.stock, -12, "#fff", 6);
     if (it.price > 0) { const pr = this._price(this.near), afford = !this.near || this.near.gold >= pr; this._label(ctx, pr + "G", 15, afford ? "#ffca28" : "#ef5350", 6); }
-    if (this.hold > 0) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 10.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, this.hold / 0.6)); ctx.stroke(); }
+    if (this.near) { // 가까이 가면 정보만 보이고, 공격하면 획득·구매
+      ctx.strokeStyle = "#fff"; ctx.globalAlpha = 0.5 + 0.3 * Math.sin(this.t * 6); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(0, 0, 11, 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
+      this._label(ctx, it.price > 0 ? "공격 = 구매" : "공격 = 획득", 23, "#fff59d", 4.6);
+    }
   }
   update(dt) {
     this.t += dt; this.lock -= dt;
@@ -52,23 +55,26 @@ class Pickup extends Component {
       if (near && nd < 10 && near.hp < near.maxHp) { near.heal(1); SFX.play("swap"); g.fx.emit(p.x, p.y, { count: 8, colors: ["#ef5350", "#fff"], speed: [10, 40], life: [0.3, 0.5], size: [1, 2], fade: true }); this.gameObject.destroy(); }
       return;
     }
-    // 무기·패시브: 가까이 서 있기
-    this.near = near && nd < 14 ? near : null;
-    const price = this._price(this.near), full = it.type === "heart" && this.near && this.near.hp >= this.near.maxHp;
-    const can = this.near && this.lock <= 0 && !full && (!(it.price > 0) || this.near.gold >= price);
-    if (!can) { this.hold = 0; this.holder = null; return; }
-    if (this.holder !== this.near) { this.holder = this.near; this.hold = 0; }
-    this.hold += dt;
-    if (this.hold < 0.6) return;
-    const h = this.near; this.hold = 0; this.holder = null;
-    if (it.price > 0) h.gold -= this._price(h);
+    // 무기·패시브·상점 하트: 가까이 가면 정보만 표시. 획득·구매는 공격(터치)할 때 Game.tryInteract → interact()
+    this.near = near && nd < 18 ? near : null;
+  }
+  // h가 이 아이템을 향해 공격했을 때
+  interact(h) {
+    const g = this.game, it = this.item, p = this.transform.position;
+    if (this.lock > 0) return false;
+    const price = it.price > 0 ? this._price(h) : 0;
+    if (it.type === "heart" && h.hp >= h.maxHp) { this._deny(h, "HP가 가득 찼어요"); return false; }
+    if (it.price > 0 && h.gold < price) { this._deny(h, `골드가 부족해요 (${price}G 필요)`); return false; }
+    if (it.price > 0) h.gold -= price;
     g.fx.emit(p.x, p.y, { count: 12, colors: ["#ffd54f", "#fff"], speed: [20, 70], life: [0.3, 0.6], size: [1, 2], fade: true });
-    if (it.type === "heart") { h.heal(1); SFX.play("swap"); if (--it.stock <= 0) this.gameObject.destroy(); return; } // 상점 하트: 인원수만큼 살 수 있다
+    if (it.type === "heart") { h.heal(1); SFX.play("swap"); if (--it.stock <= 0) this.gameObject.destroy(); return true; } // 상점 하트: 인원수만큼 살 수 있다
     SFX.play(it.type === "item" ? "item" : "swap");
-    if (it.type === "item") { h.giveItem(it.id); g.toast(`${h.nick} 획득: ${ITEMS[it.id].name} — ${ITEMS[it.id].desc}`, 3); this.gameObject.destroy(); return; }
+    if (it.type === "item") { h.giveItem(it.id); g.toast(`${h.nick} 획득: ${ITEMS[it.id].name} — ${ITEMS[it.id].desc}`, 3); this.gameObject.destroy(); return true; }
     // 무기
     const old = h.weapon; h.weapon = it.weapon;
     if (it.price > 0) { g.spawnWeaponPickup(p.x, p.y - 14, old, 0, 1.5); this.gameObject.destroy(); } // 산 무기: 원래 무기는 근처에 공짜로 떨어짐
     else { it.weapon = old; this.lock = 1.5; }
+    return true;
   }
+  _deny(h, text) { this.lock = 0.6; this.game.toast(`${h.nick}: ${text}`, 1.6); SFX.play("block"); }
 }

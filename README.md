@@ -14,7 +14,7 @@ TV 브라우저를 화면으로, 폰을 컨트롤러로 쓰는 멀티플레이 �
   - 폰은 기기 ID를 저장해 두고, 끊겼다 같은 폰으로 다시 접속하면 같은 캐릭터(아이템·골드·체력)로 이어진다. 닉네임은 폰 컨트롤러에서 입력. 죽은 플레이어는 보스방을 클리어하면 부활
   - `Sfx.js` 아주 간단한 효과음(WebAudio 합성, 첫 키 입력 후 켜짐, M 음소거)
   - `Enemy.js` 적 정의 표(`ENEMY_DEFS`)와 스케일(`BALANCE`, `calcScale`). 새 적은 표에 한 항목 + `ENEMY_POOL`에 등장 층·가중치. 일반 적 20종 + 보스 11종(8층은 마왕 고정, 나머지는 무작위). 공격 패턴(shoot·ring·ringgap·spiral·orbs·rain·bombard·cross·charge·slam·teleport·summon·guard·heal)은 매개변수로 조절 — 파일 위쪽 주석 참고
-  - `Hero.js` 플레이어, `Pickup.js` 바닥 아이템·구매, `Game.js` 진행·HUD·접속
+  - `Hero.js` 플레이어, `Pickup.js` 바닥 아이템·구매(가까이 가면 정보, 공격하면 획득·구매), `Game.js` 진행·HUD·접속
 - `shared/room.js` — 방 코드 ↔ PeerJS ID
 
 TV 화면에서 `K` 키를 누르면 키보드 1P(WASD 이동, J 공격, L 대시)로 혼자 테스트할 수 있다.

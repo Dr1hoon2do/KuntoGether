@@ -87,7 +87,9 @@ class Hero extends Component {
       for (const e of g.enemies) { if (e.spawnDelay > 0) continue; const ep = e.transform.position, d = Math.hypot(ep.x - p.x, ep.y - p.y); if (d < bd) { bd = d; best = ep; } }
       if (best) dir = Math.atan2(best.y - p.y, best.x - p.x);
     }
-    this.facing = dir; this.cd = w.cd; this.swing = { t: w.delay, dir, w };
+    this.facing = dir;
+    if (g.tryInteract(this)) { this.cd = 0.35; return; } // 아이템 앞에서 공격하면 획득·구매 (휘두르지는 않음)
+    this.cd = w.cd; this.swing = { t: w.delay, dir, w };
     if (!w.ranged) { g.spawnSlash(this, dir, w); SFX.play("swing"); }
   }
   // 맞힌 적에게 붙는 아이템 효과: 화상·둔화·기절·폭발·흡혈 문양

@@ -64,6 +64,15 @@ class Game extends Component {
     const go = this.App.create("pickup_" + d.type); go.transform.setPosition(d.x, d.y);
     const pk = go.addComponent(new Pickup(this, d)); pk.setup(); this.pickups.push(pk); return pk;
   }
+  // 플레이어가 공격(터치)할 때 호출: 가까이 있는 무기·아이템·상점 하트를 획득·구매한다
+  tryInteract(h) {
+    const p = h.transform.position; let best = null, bd = 20;
+    for (const pk of this.pickups) {
+      const t = pk.item.type; if (pk.gameObject.isDestroyed || t === "coin" || (t === "heart" && !(pk.item.price > 0))) continue;
+      const q = pk.transform.position, d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = pk; }
+    }
+    return best ? best.interact(h) : false;
+  }
   spawnCoin(x, y, value) { return this._makePickup({ type: "coin", value, x: x + (Math.random() - 0.5) * 8, y: y + (Math.random() - 0.5) * 8 }); }
   spawnHeart(x, y, price = 0) { return this._makePickup({ type: "heart", price, x, y }); }
   spawnWeaponPickup(x, y, weapon, price = 0, lock = 0.8) { return this._makePickup({ type: "weapon", weapon, price, x, y, lock }); }
