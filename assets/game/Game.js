@@ -7,6 +7,7 @@ class Game extends Component {
     this.floorNum = 1; this.map = null; this.cur = null; this.state = "explore"; // explore | fight | over | victory
     this.nextId = 0; this.overTimer = 0; this.introTimer = 0; this.introText = "";
     this.doorHold = 0; this.stairsHold = 0; this.stairsGO = null; this.toastText = ""; this.toastT = 0;
+    this.usedBosses = new Set();
   }
   awake() {
     const App = this.App;
@@ -18,8 +19,9 @@ class Game extends Component {
       this.cam.shake(e.enemy.boss ? 6 : 0.8, e.enemy.boss ? 0.6 : 0.08);
       const by = e.by; if (!by || !by.stats) return;
       if (by.stats.lifesteal && Math.random() < by.stats.lifesteal) by.heal(1);
-      if (!e.enemy.boss && Math.random() < 0.02 + by.stats.heartDrop) { const q = e.enemy.transform.position; this.spawnHeart(q.x, q.y); }
+      if (!e.enemy.boss && Math.random() < 0.005 + by.stats.heartDrop) { const q = e.enemy.transform.position; this.spawnHeart(q.x, q.y); }
     }, { owner: this });
+    Events.on("hero.hit", () => this._flashVignette(), { owner: this });
     this.startRun();
   }
 
@@ -50,6 +52,10 @@ class Game extends Component {
     if (opts && opts.owner) pr.owner = opts.owner;
     this.projs.push(pr);
   }
+  spawnHazard(x, y, r, delay, dmg, color) {
+    const go = this.App.create("hazard"); go.transform.setPosition(x, y);
+    const hz = go.addComponent(new Hazard(this, r, delay, dmg, color)); hz.setup(); return hz;
+  }
   spawnEnemy(type, x, y, opts) {
     const go = this.App.create("enemy"); go.transform.setPosition(x, y);
     const e = go.addComponent(new Enemy(this, type, opts)); e.setup(); this.enemies.push(e); return e;
@@ -63,17 +69,17 @@ class Game extends Component {
   spawnWeaponPickup(x, y, weapon, price = 0, lock = 0.8) { return this._makePickup({ type: "weapon", weapon, price, x, y, lock }); }
   spawnItemPickup(x, y, id, price = 0) { return this._makePickup({ type: "item", id, price, x, y }); }
   toast(text, secs = 2.5) { this.toastText = text; this.toastT = secs; }
-  // n개를 가로로(6개 넘으면 두 줄) 가지런히 놓을 자리
+  // n개를 한 줄에 최대 8개씩 가지런히 놓을 자리 (cy: 가운데 높이)
   _layout(n, cy = 0) {
-    const row = (cnt, y) => Array.from({ length: cnt }, (_, i) => ({ x: (i - (cnt - 1) / 2) * 42, y }));
-    if (n <= 5) return row(n, cy);
-    const top = Math.ceil(n / 2); return [...row(top, cy + 20), ...row(n - top, cy - 20)];
+    const rows = Math.max(1, Math.ceil(n / 8)), per = Math.ceil(n / rows), out = [];
+    for (let r = 0; r < rows; r++) { const cnt = Math.min(per, n - r * per), y = cy + ((rows - 1) / 2 - r) * 34; for (let i = 0; i < cnt; i++) out.push({ x: (i - (cnt - 1) / 2) * 44, y }); }
+    return out;
   }
 
   // ---------- 런·층·방 ----------
   startRun() {
     for (const h of this.roster.values()) { h.resetRun(); h.alive = true; h.invuln = 0; }
-    this.floorNum = 1; this.startFloor();
+    this.usedBosses = new Set(); this.floorNum = 1; this.startFloor();
   }
   startFloor() {
     this._clearObjects(); this.cur = null; this.map = generateFloor(this.floorNum);
@@ -90,7 +96,7 @@ class Game extends Component {
     this._clearObjects();
   }
   enterRoom(room, dir) {
-    if (this.cur) this._leaveRoom();
+    if (this.cur) { this._leaveRoom(); this._fadeIn(); SFX.play("door"); }
     this.cur = room; room.visited = true; this.doorHold = 0; this.stairsHold = 0; this.state = "explore";
     const hw = ARENA_W / 2, hh = ARENA_H / 2, n = this.heroes.length, side = dir ? OPP[dir] : "S";
     this.heroes.forEach((h, i) => {
@@ -133,54 +139,57 @@ class Game extends Component {
   }
   _spawnBoss() {
     const [x, y] = [0, ARENA_H / 2 - 50];
-    this.spawnEnemy(bossForFloor(this.floorNum), x, y, { delay: 1.3 });
+    this.spawnEnemy(pickBoss(this.floorNum, this.usedBosses), x, y, { delay: 1.3 });
   }
   _heldItems() { return new Set(this.heroes.flatMap(h => h.items)); }
+  // 보물방: 인원수만큼 패시브 아이템 + 인원수만큼 무기
   _stockTreasure(np) {
-    const n = Math.min(8, np + 1), taken = this._heldItems(), pos = this._layout(n);
-    const items = n === 1 ? 1 : Math.min(n - 1, Math.max(1, Math.round(n * 0.6))); // 패시브 약 60%, 나머지는 무기 (둘 다 최소 1개)
-    for (let i = 0; i < n; i++) {
-      if (i < items) { const id = randomItemId(taken); taken.add(id); this.spawnItemPickup(pos[i].x, pos[i].y, id); }
-      else this.spawnWeaponPickup(pos[i].x, pos[i].y, randomWeapon(this.floorNum + 4));
-    }
+    const taken = this._heldItems(), pos = this._layout(np * 2);
+    for (let i = 0; i < np; i++) { const id = randomItemId(taken); taken.add(id); this.spawnItemPickup(pos[i].x, pos[i].y, id); }
+    for (let i = 0; i < np; i++) this.spawnWeaponPickup(pos[np + i].x, pos[np + i].y, randomWeapon(this.floorNum + 4));
   }
+  // 상점: (1~3) + 인원수x2 개의 품목. 하트가 나오면 인원수만큼 살 수 있다. 가격은 층이 오를수록 조금씩 오른다.
   _stockShop(np) {
-    const n = Math.min(8, np + 3), taken = this._heldItems(), pos = this._layout(n);
-    const hearts = np >= 3 ? 2 : 1, items = Math.ceil((n - hearts) * 0.55);
-    for (let i = 0; i < n; i++) {
-      const p = pos[i];
-      if (i < hearts) this.spawnHeart(p.x, p.y, 6);
-      else if (i < hearts + items) { const id = randomItemId(taken); taken.add(id); this.spawnItemPickup(p.x, p.y, id, ITEMS[id].price); }
-      else { const w = randomWeapon(this.floorNum + 2); this.spawnWeaponPickup(p.x, p.y, w, weaponPrice(w)); }
-    }
+    const n = Math.min(24, 1 + Math.floor(Math.random() * 3) + np * 2), taken = this._heldItems(), mul = 1 + 0.1 * (this.floorNum - 1);
+    const list = [];
+    if (Math.random() < 0.6) list.push({ type: "heart", price: Math.round(25 * mul), stock: np });
+    const rest = n - list.length, items = Math.ceil(rest * 0.55);
+    for (let i = 0; i < items; i++) { const id = randomItemId(taken); taken.add(id); list.push({ type: "item", id, price: Math.round(ITEMS[id].price * mul) }); }
+    for (let i = 0; i < rest - items; i++) { const w = randomWeapon(this.floorNum + 2); list.push({ type: "weapon", weapon: w, price: Math.round(weaponPrice(w) * mul) }); }
+    list.sort(() => Math.random() - 0.5);
+    const pos = this._layout(list.length);
+    list.forEach((it, i) => this._makePickup({ ...it, x: pos[i].x, y: pos[i].y }));
   }
   clearRoom() {
     const room = this.cur, np = this._np(), f = this.floorNum;
-    room.cleared = true; this.state = "explore";
-    for (const h of this.heroes) { // 방 클리어 효과 (치유의 향로·저금통)
+    room.cleared = true; this.state = "explore"; SFX.play("clear");
+    for (const h of this.heroes) { // 방 클리어 효과 (치유의 향로: 확률, 저금통)
       if (!h.alive) continue;
-      if (h.stats.roomHeal) h.heal(h.stats.roomHeal);
+      if (h.stats.roomHeal && Math.random() < h.stats.roomHeal) h.heal(1);
       if (h.stats.roomGold) h.addGold(h.stats.roomGold);
     }
     const rand = (a, b) => a + Math.random() * (b - a);
     if (room.type === "normal") {
-      if (Math.random() < 0.55) this.spawnHeart(rand(-40, 40), rand(-20, 20));
-      if (Math.random() < 0.3) this.spawnCoin(rand(-40, 40), rand(-20, 20), 2 + Math.floor(Math.random() * 3));
+      if (Math.random() < 0.15) this.spawnHeart(rand(-40, 40), rand(-20, 20)); // 회복은 박하다
+      if (Math.random() < 0.3) this.spawnCoin(rand(-40, 40), rand(-20, 20), 2);
     } else if (room.type === "elite") {
       const nw = Math.ceil(np / 2), pos = this._layout(nw, -10);
       for (let i = 0; i < nw; i++) this.spawnWeaponPickup(pos[i].x, pos[i].y, randomWeapon(f + 4, 1));
       for (let i = 0; i < 3; i++) this.spawnCoin(rand(-40, 40), rand(-40, 0), 3);
-      this.spawnHeart(0, 30); this.toast("엘리트 격파! 보상이 나왔다", 2.5);
+      if (Math.random() < 0.4) this.spawnHeart(0, 30);
+      this.toast("엘리트 격파! 보상이 나왔다", 2.5);
     } else if (room.type === "boss") {
       const dead = this.heroes.filter(h => !h.alive); // 죽은 플레이어는 보스방을 클리어해야 부활한다
       for (const h of dead) h.revive(Math.ceil(h.maxHp / 2));
       if (dead.length) this.toast(`보스 격파! ${dead.map(h => h.nick).join(", ")} 부활`, 3);
-      for (let i = 0; i < 4; i++) this.spawnCoin(rand(-50, 50), rand(-30, 0), 3 + f);
-      this.spawnHeart(-45, 25); if (np >= 3) this.spawnHeart(45, 25);
-      const n = Math.max(2, np), taken = this._heldItems(), pos = this._layout(n, -25);
-      for (let i = 0; i < n; i++) { const id = randomItemId(taken); taken.add(id); this.spawnItemPickup(pos[i].x, pos[i].y, id); }
-      if (f >= MAX_FLOOR) { this.state = "victory"; this.overTimer = 14; this.cam.shake(8, 1); this.toast("마왕을 쓰러뜨렸다!", 4); }
-      else { this._makeStairs(); if (!dead.length) this.toast("보스 격파! 아이템을 챙기고 계단으로", 3); }
+      for (let i = 0; i < 4; i++) this.spawnCoin(rand(-50, 50), rand(-30, 0), 2 + f);
+      for (let i = 0; i < Math.max(1, Math.floor(np / 3)); i++) this.spawnHeart(rand(-50, 50), 40);
+      // 보상: 인원수만큼 패시브 아이템 + 인원수만큼 무기(희귀 이상)
+      const taken = this._heldItems(), pos = this._layout(np * 2, -25);
+      for (let i = 0; i < np; i++) { const id = randomItemId(taken); taken.add(id); this.spawnItemPickup(pos[i].x, pos[i].y, id); }
+      for (let i = 0; i < np; i++) this.spawnWeaponPickup(pos[np + i].x, pos[np + i].y, randomWeapon(f + 5, 1));
+      if (f >= MAX_FLOOR) { this.state = "victory"; this.overTimer = 14; this.cam.shake(8, 1); this.toast("마왕을 쓰러뜨렸다!", 4); SFX.play("win"); }
+      else { this._makeStairs(); if (!dead.length) this.toast("보스 격파! 보상을 챙기고 계단으로", 3); }
     }
   }
   _makeStairs() {
@@ -205,6 +214,7 @@ class Game extends Component {
     this.heroes.push(h); this.roster.set(pid, h);
     return h;
   }
+  removeHero(h) { h.gameObject.destroy(); this.heroes = this.heroes.filter(x => x !== h); this.roster.delete(h.pid); }
   // 접속이 끊기면 캐릭터를 비활성화해 두고(아이템·골드·체력 그대로), 같은 pid가 돌아오면 되살린다
   deactivateHero(h) {
     h.conn = null; Object.assign(h.input, { mx: 0, my: 0, ax: 0, ay: 0, atk: 0, dash: 0 });
@@ -246,7 +256,7 @@ class Game extends Component {
     if (this.heroes.length && this.cur) {
       if (this.state === "fight") {
         if (this.enemies.length === 0) this.clearRoom();
-        else if (this.heroes.every(h => !h.alive)) { this.state = "over"; this.overTimer = 6; }
+        else if (this.heroes.every(h => !h.alive)) { this.state = "over"; this.overTimer = 6; SFX.play("over"); }
       } else if (this.state === "explore") { this._updateDoors(dt); this._updateStairs(dt); }
       else { this.overTimer -= dt; if (this.overTimer <= 0) this.startRun(); } // over | victory
     }
@@ -285,12 +295,16 @@ class Game extends Component {
     this.hudBoss = this._text("boss", { fontSize: 8, align: "center", verticalAlign: "top", color: "#ff8a80" }, rt => rt.setAnchor(0, 0, 1, 0).setPivot(0, 0).setOffsets(0, 18, 0, 0));
     this.hudCenter = this._text("center", { fontSize: 15, wrap: true }, rt => rt.setAnchor(0, 0, 1, 1).setOffsets(20, 20, 20, 20));
     this.hudToast = this._text("toast", { fontSize: 8, wrap: true, color: "#ffe082", verticalAlign: "bottom" }, rt => rt.setAnchor(0, 0, 1, 1).setOffsets(20, 0, 20, 26));
+    const overlay = (name, color, order) => { const go = this.App.createUI(name), rt = go.getComponent(RectTransform); rt.setAnchor(0, 0, 1, 1).setOffsets(0, 0, 0, 0); rt.sortOrder = order; go.addComponent(new UIRect({ color })); rt.alpha = 0; return rt; };
+    this.vignette = overlay("vignette", "#d50000", 98); this.fade = overlay("fade", "#000000", 99);
     this.hudHeroes = this._text("heroes", { fontSize: 7, align: "left", verticalAlign: "bottom", wrap: true }, rt => rt.setAnchor(0, 0, 1, 1).setOffsets(8, 0, 8, 5));
   }
+  _fadeIn() { Tween.killTweensOf(this.fade); this.fade.alpha = 1; Tween.to(this.fade, { alpha: 0 }, 0.3, { ease: "outQuad" }); }   // 방 이동: 검정에서 서서히 밝아짐
+  _flashVignette() { Tween.killTweensOf(this.vignette); this.vignette.alpha = 0.3; Tween.to(this.vignette, { alpha: 0 }, 0.25); }  // 맞으면 화면이 잠깐 붉어짐
   _updateHud() {
     const room = this.cur;
     this.hudTop.setText(room ? `${this.floorNum}층 · ${ROOM_NAMES[room.type]}${this.state === "fight" ? `   남은 적 ${this.enemies.length}` : ""}` : "");
-    this.hudRoom.setText(this.roomCode ? `방 코드 ${this.roomCode}` : "");
+    this.hudRoom.setText(this.roomCode ? `방 코드 ${this.roomCode}${SFX.unlocked ? (SFX.muted ? "  🔇 M" : "") : "  🔇 아무 키나 누르면 소리 켜짐"}` : "");
     const boss = this.enemies.find(e => e.boss && !e.dead);
     this.hudBoss.setText(boss ? `☠ ${boss.title}  ${"█".repeat(Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${"░".repeat(20 - Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}` : "");
     this.hudHeroes.setText(this.heroes.map(h => `${h.nick} ${h.alive ? "♥".repeat(h.hp) + "♡".repeat(h.maxHp - h.hp) : "💀"} ${weaponLabel(h.weapon)} ${h.gold}G ★${h.items.length}`).join("    "));

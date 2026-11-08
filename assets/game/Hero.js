@@ -49,7 +49,7 @@ class Hero extends Component {
     const g = this.game, i = this.input, t = this.transform, s = this.stats;
     this.invuln -= dt; this.cd -= dt; this.dashCd -= dt;
     this.draw.opacity = this.invuln > 0 && Math.floor(this.invuln * 14) % 2 ? 0.35 : 1;
-    if (s.regen > 0) { this.regenT += dt; if (this.regenT >= 30 / s.regen) { this.regenT = 0; if (this.hp < this.maxHp) { this.heal(1); g.fx.emit(t.position.x, t.position.y, { count: 5, colors: ["#81c784", "#fff"], speed: [10, 30], life: [0.3, 0.5], size: [1, 2], fade: true }); } } }
+    if (s.regen > 0) { this.regenT += dt; if (this.regenT >= 90 / s.regen) { this.regenT = 0; if (this.hp < this.maxHp) { this.heal(1); g.fx.emit(t.position.x, t.position.y, { count: 5, colors: ["#81c784", "#fff"], speed: [10, 30], life: [0.3, 0.5], size: [1, 2], fade: true }); } } }
 
     let mx = i.mx, my = i.my; const ml = Math.hypot(mx, my);
     if (ml > 1) { mx /= ml; my /= ml; }
@@ -83,14 +83,26 @@ class Hero extends Component {
     let dir = this.facing;
     if (Math.hypot(this.input.ax, this.input.ay) > 0.35) dir = Math.atan2(this.input.ay, this.input.ax); // 드래그로 직접 조준
     else { // 자동 조준
-      let best = null, bd = w.range + 22;
+      let best = null, bd = w.ranged ? Math.min(w.range, 150) : w.range + 22;
       for (const e of g.enemies) { if (e.spawnDelay > 0) continue; const ep = e.transform.position, d = Math.hypot(ep.x - p.x, ep.y - p.y); if (d < bd) { bd = d; best = ep; } }
       if (best) dir = Math.atan2(best.y - p.y, best.x - p.x);
     }
     this.facing = dir; this.cd = w.cd; this.swing = { t: w.delay, dir, w };
-    g.spawnSlash(this, dir, w);
+    if (!w.ranged) { g.spawnSlash(this, dir, w); SFX.play("swing"); }
+  }
+  // 맞힌 적에게 붙는 아이템 효과: 화상·둔화·기절·폭발·흡혈 문양
+  applyHitEffects(e, dmg) {
+    const s = this.stats, g = this.game;
+    e.applyStatus(s, this);
+    if (s.explode) {
+      const ep = e.transform.position; let any = false;
+      for (const o of g.enemies) { if (o === e || o.dead || o.spawnDelay > 0) continue; const op = o.transform.position; if (Math.hypot(op.x - ep.x, op.y - ep.y) < 20 + o.radius) { o.damage(dmg * 0.4 * s.explode, this, Math.atan2(op.y - ep.y, op.x - ep.x), 60); any = true; } }
+      g.fx.emit(ep.x, ep.y, { count: 8, colors: ["#ff8a65", "#fff59d"], speed: [30, 80], life: [0.15, 0.3], size: [1, 2], fade: true, area: 6 });
+    }
+    if (s.leech > 0) { this.leechN++; if (this.leechN >= 15 / s.leech) { this.leechN = 0; this.heal(1); } }
   }
   _strike(dir, w, isEcho) {
+    if (w.ranged) return this._fire(dir, w, isEcho);
     const g = this.game, p = this.transform.position, s = this.stats;
     const dmg = w.dmg * (Math.random() < s.crit ? 2 : 1), half = (w.arc * Math.PI / 180) / 2;
     const inArc = (x, y, pad) => {
@@ -102,20 +114,47 @@ class Hero extends Component {
     for (const e of g.enemies) {
       if (e.dead || e.spawnDelay > 0) continue;
       const ep = e.transform.position;
-      if (inArc(ep.x, ep.y, e.radius)) { e.damage(dmg, this, Math.atan2(ep.y - p.y, ep.x - p.x), w.knock); e.applyStatus(w, this); hit++; }
+      if (inArc(ep.x, ep.y, e.radius)) { e.damage(dmg, this, Math.atan2(ep.y - p.y, ep.x - p.x), w.knock); this.applyHitEffects(e, dmg); hit++; }
     }
-    for (const pr of g.projs) { // 적 탄 튕겨내기
-      if (pr.fromPlayer || pr.gameObject.isDestroyed) continue;
+    if (s.deflect > 0) for (const pr of g.projs) { // 적 탄 상쇄(1) / 반사(2) — 아이템이 있어야만 가능
+      if (pr.fromPlayer || pr.gameObject.isDestroyed || pr.orbit) continue;
       const pp = pr.transform.position;
-      if (inArc(pp.x, pp.y, 4)) { pr.owner = this; pr.reflect(this, dir); }
+      if (!inArc(pp.x, pp.y, 4)) continue;
+      if (s.deflect >= 2) { pr.owner = this; pr.reflect(this, dir); }
+      else { g.fx.emit(pp.x, pp.y, { count: 4, colors: ["#fff", "#ff8a65"], speed: [20, 50], life: [0.15, 0.3], size: [1, 1.6], fade: true }); pr.gameObject.destroy(); SFX.play("block"); }
     }
-    if (hit && w.leech) { this.leechN += hit; while (this.leechN >= w.leech) { this.leechN -= w.leech; this.heal(1); } }
     if (!isEcho) {
       for (let b = 0; b < s.beam; b++) g.spawnProj(p.x, p.y, dir + (b - (s.beam - 1) / 2) * 0.25, 190, w.dmg * 0.5, true, { pierce: true, beam: true, life: 0.9, owner: this });
       for (let k = 1; k < (w.hits || 1); k++) this.echoes.push({ t: 0.1 * k, dir, w });
       if (Math.random() < s.doubleSwing) this.echoes.push({ t: 0.16, dir, w });
     }
     if (hit) g.cam.shake(w.knock > 150 ? 2.5 : 1.2, 0.1);
+  }
+  // 원거리 무기 발사
+  _fire(dir, w, isEcho) {
+    const g = this.game, p = this.transform.position, s = this.stats;
+    const dmg = w.dmg * (Math.random() < s.crit ? 2 : 1);
+    const n = (w.count || 1) + s.extraShots, spread = w.arc ? w.arc * Math.PI / 180 : 0.2 * (n - 1);
+    const angs = Array.from({ length: n }, (_, i) => (n === 1 ? dir : dir + (i - (n - 1) / 2) * (spread / (n - 1))));
+    SFX.play("shoot");
+    g.fx.emit(p.x + Math.cos(dir) * 8, p.y + Math.sin(dir) * 8, { count: 3, colors: [TIERS[this.weapon.tier].color, "#fff"], speed: [15, 40], life: [0.1, 0.2], size: [1, 1.6], fade: true, angle: dir, spread: 0.8 });
+    if (w.kind === "laser") { for (const a of angs) this._laser(a, w, dmg); return; }
+    const spd = w.speed || 220;
+    for (const a of angs) g.spawnProj(p.x, p.y, a, spd, dmg, true, {
+      owner: this, knock: w.knock, kind: w.kind, color: TIERS[this.weapon.tier].color,
+      pierce: w.kind === "pierce" || w.kind === "boomerang" || !!s.pierce, life: w.range / spd * (w.kind === "boomerang" ? 3 : 1), radius: w.kind === "orb" ? 4.5 : 2.6,
+      area: w.kind === "orb" ? w.area * s.range : 0, boomerang: w.kind === "boomerang", range: w.range, speed: spd });
+  }
+  _laser(a, w, dmg) { // 즉시 직선 공격
+    const g = this.game, p = this.transform.position, cs = Math.cos(a), sn = Math.sin(a);
+    for (const e of g.enemies) {
+      if (e.dead || e.spawnDelay > 0) continue;
+      const ep = e.transform.position, dx = ep.x - p.x, dy = ep.y - p.y, along = dx * cs + dy * sn, perp = Math.abs(-dx * sn + dy * cs);
+      if (along > 0 && along < w.range + e.radius && perp < w.width / 2 + e.radius) { e.damage(dmg, this, a, w.knock); this.applyHitEffects(e, dmg); }
+    }
+    const go = g.App.create("laser"); go.transform.setPosition(p.x, p.y); go.transform.rotation = a; let t = 0;
+    go.addComponent(new DrawRenderer(ctx => { ctx.globalAlpha = 1 - t / 0.12; ctx.strokeStyle = TIERS[this.weapon.tier].color; ctx.lineWidth = w.width * 0.7; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(w.range, 0); ctx.stroke(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(w.range, 0); ctx.stroke(); }, w.range + 10, { order: 8 }));
+    go.addComponent(new (class extends Component { update(dt) { t += dt; if (t > 0.12) go.destroy(); } })());
   }
   hit(n, fromX, fromY, kb = 120) {
     if (!this.alive || this.invuln > 0) return;
@@ -124,6 +163,7 @@ class Hero extends Component {
       this.invuln = 0.4; g.fx.emit(p.x, p.y, { count: 6, colors: ["#fff", this.color], speed: [20, 50], life: [0.2, 0.4], size: [1, 1.6], fade: true }); return;
     }
     this.hp -= n; this.invuln = 1.0 + s.invuln; this.draw.flash = 0.1;
+    Events.emit("hero.hit", { hero: this }); SFX.play("hurt");
     const a = Math.atan2(p.y - fromY, p.x - fromX);
     this.kx = Math.cos(a) * kb; this.ky = Math.sin(a) * kb; this.swing = null;
     g.cam.shake(3, 0.25);
