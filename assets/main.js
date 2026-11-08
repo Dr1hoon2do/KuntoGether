@@ -2,6 +2,7 @@
 (function () {
   Config.uiScaleMode = "fit";
   Config.pixelPerfect = false;
+  Config.viewWidth = 400; Config.viewHeight = 225; // 아레나가 한 화면에 꽉 차게
   Config.debug = new URLSearchParams(location.search).has("debug");
 
   const App = new Engine({ canvas: "#game", clearColor: "#05070a", pixelRatio: Math.min(2, window.devicePixelRatio || 1) });

@@ -24,17 +24,20 @@ const $ = id => document.getElementById(id);
 const code = normalizeCode(new URLSearchParams(location.search).get("join") || "");
 const msg = t => { $("msg").textContent = t || ""; $("msg").classList.toggle("hide", !t); };
 
-// ---------- 스틱 (왼쪽 절반 = 이동, 오른쪽 절반 = 조준·발사) ----------
+// ---------- 조작: 왼쪽 = 이동 스틱, 오른쪽 아무 데나 = 공격(누른 채 드래그하면 그 방향으로), 오른쪽 아래 버튼 = 대시 ----------
 const cv = $("pad"), g = cv.getContext("2d"), R = 55; // 스틱 최대 반경(px)
 const sticks = { move: null, aim: null }; // { id, ox, oy, x, y }
-let color = "#4fc3f7";
+let dashPtr = null, color = "#4fc3f7", weapon = "";
+const dashBtn = () => ({ x: innerWidth - 70, y: innerHeight - 70, r: 42 });
 function resize() { cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio; g.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0); draw(); }
 addEventListener("resize", resize);
 
 cv.addEventListener("pointerdown", e => {
+  cv.setPointerCapture(e.pointerId);
+  const d = dashBtn();
+  if (dashPtr === null && Math.hypot(e.clientX - d.x, e.clientY - d.y) < d.r + 10) { dashPtr = e.pointerId; draw(); return; }
   const k = e.clientX < innerWidth / 2 ? "move" : "aim";
   if (sticks[k]) return;
-  cv.setPointerCapture(e.pointerId);
   sticks[k] = { id: e.pointerId, ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY };
   draw();
 });
@@ -42,7 +45,11 @@ cv.addEventListener("pointermove", e => {
   for (const s of Object.values(sticks)) if (s && s.id === e.pointerId) { s.x = e.clientX; s.y = e.clientY; }
   draw();
 });
-const end = e => { for (const k in sticks) if (sticks[k] && sticks[k].id === e.pointerId) sticks[k] = null; draw(); };
+const end = e => {
+  for (const k in sticks) if (sticks[k] && sticks[k].id === e.pointerId) sticks[k] = null;
+  if (dashPtr === e.pointerId) dashPtr = null;
+  draw();
+};
 cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
 
 const vec = s => {
@@ -55,11 +62,14 @@ function draw() {
   g.clearRect(0, 0, innerWidth, innerHeight);
   g.strokeStyle = "#ffffff18"; g.beginPath(); g.moveTo(innerWidth / 2, 0); g.lineTo(innerWidth / 2, innerHeight); g.stroke();
   g.fillStyle = "#ffffff30"; g.font = "14px sans-serif"; g.textAlign = "center";
-  g.fillText("이동", innerWidth / 4, innerHeight - 20); g.fillText("조준 · 발사", innerWidth * 3 / 4, innerHeight - 20);
-  for (const s of Object.values(sticks)) if (s) {
-    g.strokeStyle = color; g.lineWidth = 2; g.beginPath(); g.arc(s.ox, s.oy, R, 0, 7); g.stroke();
+  g.fillText("이동", innerWidth / 4, innerHeight - 20); g.fillText("터치 = 공격 (드래그로 방향)", innerWidth * 3 / 4 - 40, innerHeight - 20);
+  const d = dashBtn();
+  g.fillStyle = dashPtr !== null ? color + "cc" : color + "44"; g.beginPath(); g.arc(d.x, d.y, d.r, 0, 7); g.fill();
+  g.strokeStyle = color; g.lineWidth = 2; g.stroke(); g.fillStyle = "#fff"; g.fillText("대시", d.x, d.y + 5);
+  for (const [k, s] of Object.entries(sticks)) if (s) {
+    g.strokeStyle = k === "aim" ? "#ff8a65" : color; g.lineWidth = 2; g.beginPath(); g.arc(s.ox, s.oy, R, 0, 7); g.stroke();
     const l = Math.hypot(s.x - s.ox, s.y - s.oy) || 1, m = Math.min(l, R);
-    g.fillStyle = color + "aa"; g.beginPath(); g.arc(s.ox + (s.x - s.ox) / l * m, s.oy + (s.y - s.oy) / l * m, 24, 0, 7); g.fill();
+    g.fillStyle = (k === "aim" ? "#ff8a65" : color) + "aa"; g.beginPath(); g.arc(s.ox + (s.x - s.ox) / l * m, s.oy + (s.y - s.oy) / l * m, 24, 0, 7); g.fill();
   }
 }
 
@@ -84,17 +94,16 @@ else {
       msg("");
       timer = setInterval(() => {
         const [mx, my] = vec(sticks.move), [ax, ay] = vec(sticks.aim);
-        const out = JSON.stringify({ t: "s", mx: +mx.toFixed(2), my: +my.toFixed(2), ax: +ax.toFixed(2), ay: +ay.toFixed(2) });
+        const out = JSON.stringify({ t: "s", mx: +mx.toFixed(2), my: +my.toFixed(2), ax: +ax.toFixed(2), ay: +ay.toFixed(2), atk: sticks.aim ? 1 : 0, dash: dashPtr !== null ? 1 : 0 });
         if (out !== last) { c.send(JSON.parse(out)); last = out; }
       }, 33);
     });
     let prevHp = null;
     c.on("data", d => {
       if (d.t === "welcome") { color = d.color; draw(); }
-      else if (d.t === "full") msg("방이 가득 찼어요.");
       else if (d.t === "st") {
-        $("hp").textContent = d.alive ? "♥".repeat(d.hp) + "♡".repeat(d.maxHp - d.hp) : "💀 대기 중...";
-        $("score").textContent = d.score;
+        $("hp").textContent = d.alive ? "♥".repeat(d.hp) + "♡".repeat(d.maxHp - d.hp) : "💀 다음 방에서 부활";
+        $("score").textContent = `ROOM ${d.room} · ${d.weapon} · 처치 ${d.kills}`;
         if (prevHp !== null && d.hp < prevHp && navigator.vibrate) navigator.vibrate(120);
         prevHp = d.hp;
       }

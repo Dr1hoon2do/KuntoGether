@@ -1,17 +1,157 @@
-// 게임 진행(웨이브·점수·HUD)과 폰 접속 처리
+// 방 진행(전투 → 보상 → 포털 → 다음 방), 무기·아이템 드랍, HUD, 폰 접속 처리
 class Game extends Component {
   constructor(App) {
     super();
     this.App = App; this.cam = App.camera;
-    this.ships = []; this.enemies = []; this.conns = new Map();
-    this.state = "play"; this.time = 0; this.spawnCd = 1; this.overTimer = 0; this.nextId = 0;
+    this.heroes = []; this.enemies = []; this.projs = []; this.pickups = []; this.conns = new Map();
+    this.state = "fight"; this.room = 0; this.nextId = 0; this.overTimer = 0; this.introTimer = 0;
+    this.portal = null; this.portalT = 0;
   }
   awake() {
     const App = this.App;
-    const bg = App.create("arena"); bg.addComponent(new ArenaRenderer(ARENA_W, ARENA_H));
-    const fxGo = App.create("fx"); this.fx = fxGo.addComponent(new ParticleSystem({ capacity: 2048 }));
+    this.arena = App.create("arena").addComponent(new ArenaRenderer(ARENA_W, ARENA_H));
+    this.fx = App.create("fx").addComponent(new ParticleSystem({ capacity: 2048 }));
     this._buildHud();
-    Events.on("enemy.killed", () => this.cam.shake(0.8, 0.08), { owner: this });
+    Events.on("enemy.killed", e => {
+      this.cam.shake(e.enemy.type === "boss" ? 5 : 0.8, e.enemy.type === "boss" ? 0.5 : 0.08);
+      if (Math.random() < 0.07) this.spawnHeart(e.enemy.transform.position.x, e.enemy.transform.position.y);
+    }, { owner: this });
+    this.startRoom(1);
+  }
+
+  // ---------- 생성 도우미 ----------
+  spawnSlash(hero, dir, w) {
+    const go = this.App.create("slash"), p = hero.transform.position, color = TIERS[hero.weapon.tier].color;
+    go.transform.setPosition(p.x, p.y); go.transform.rotation = dir;
+    let t = 0; const dur = w.dur, half = (w.arc * Math.PI / 180) / 2;
+    const rend = go.addComponent(new DrawRenderer(ctx => {
+      const k = Math.min(1, t / dur); ctx.globalAlpha = 1 - k * k;
+      ctx.fillStyle = color; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.lineCap = "round";
+      if (w.kind === "thrust") { // 창: 앞으로 찌르는 선
+        const len = w.range * Math.min(1, k * 2.5 + 0.3);
+        ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(len, 0); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(len + 5, 0); ctx.lineTo(len - 3, 3); ctx.lineTo(len - 3, -3); ctx.closePath(); ctx.fill();
+      } else {
+        const sweep = w.arc >= 360 ? Math.PI * 2 : half * 2, start = w.arc >= 360 ? 0 : -half, cur = start + sweep * Math.min(1, k * 1.6);
+        ctx.globalAlpha *= 0.55; ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, w.range, start, cur); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = (1 - k * k); ctx.beginPath(); ctx.arc(0, 0, w.range, start, cur); ctx.stroke();
+      }
+    }, w.range + 10, { order: 8 }));
+    go.addComponent(new (class extends Component { update(dt) { t += dt; go.transform.setPosition(hero.transform.position.x, hero.transform.position.y); if (t > dur) go.destroy(); } })());
+  }
+  spawnProj(x, y, angle, speed, dmg, fromPlayer) {
+    const go = this.App.create("proj"); go.transform.setPosition(x, y);
+    const pr = go.addComponent(new Projectile(this, angle, speed, dmg, fromPlayer)); pr.setup();
+    this.projs.push(pr);
+  }
+  spawnHeart(x, y) {
+    const go = this.App.create("heart"); go.transform.setPosition(x, y);
+    const pk = go.addComponent(new Pickup(this, { type: "heart" })); pk.setup(); this.pickups.push(pk);
+  }
+  spawnWeaponPickup(x, y, weapon) {
+    const go = this.App.create("weapon"); go.transform.setPosition(x, y);
+    const pk = go.addComponent(new Pickup(this, { type: "weapon", weapon })); pk.setup(); this.pickups.push(pk);
+  }
+  spawnEnemy(type, x, y, hpMult, delay) {
+    const go = this.App.create("enemy"); go.transform.setPosition(x, y);
+    const e = go.addComponent(new Enemy(this, type, hpMult, delay)); e.setup(); this.enemies.push(e);
+  }
+
+  // ---------- 방 진행 ----------
+  startRoom(n) {
+    this.room = n; this.state = "fight"; this.introTimer = 2.2; this.arena.locked = true;
+    for (const o of [...this.enemies, ...this.projs, ...this.pickups]) o.gameObject.destroy();
+    this.enemies = []; this.projs = []; this.pickups = [];
+    if (this.portal) { this.portal.destroy(); this.portal = null; }
+    const np = Math.max(1, this.heroes.length);
+    this.heroes.forEach((h, i) => {
+      h.transform.setPosition((i - (np - 1) / 2) * 22, -ARENA_H / 2 + 25);
+      if (!h.alive) h.revive(3);
+      h.cd = 0; h.swing = null;
+    });
+    const hpMult = (1 + 0.15 * (n - 1)) * (0.7 + 0.3 * np);
+    const spawnAt = () => {
+      for (let tries = 0; tries < 20; tries++) {
+        const x = (Math.random() * 2 - 1) * (ARENA_W / 2 - 25), y = (Math.random() * 2 - 1) * (ARENA_H / 2 - 25);
+        if (this.heroes.every(h => Math.hypot(h.transform.position.x - x, h.transform.position.y - y) > 70)) return [x, y];
+      }
+      return [0, ARENA_H / 2 - 30];
+    };
+    const boss = n % 5 === 0;
+    const count = Math.min(34, Math.round((3 + n * 0.9) * (0.6 + 0.4 * np)));
+    const pool = [["grunt", 10]];
+    if (n >= 2) pool.push(["runner", 5]);
+    if (n >= 3) pool.push(["shooter", 4]);
+    if (n >= 4) pool.push(["tank", 2]);
+    const total = pool.reduce((a, p) => a + p[1], 0);
+    const pick = () => { let r = Math.random() * total; for (const [t, w] of pool) { if ((r -= w) < 0) return t; } return "grunt"; };
+    if (boss) { const [x, y] = [0, ARENA_H / 2 - 40]; this.spawnEnemy("boss", x, y, hpMult * (1 + (n / 5 - 1) * 0.5), 1.2); }
+    const normal = boss ? Math.round(count * 0.5) : count;
+    for (let i = 0; i < normal; i++) { const [x, y] = spawnAt(); this.spawnEnemy(pick(), x, y, hpMult, 0.7 + i * 0.12); }
+  }
+  clearRoom() {
+    this.state = "clear"; this.arena.locked = false; this.portalT = 0;
+    const np = this.heroes.length, boss = this.room % 5 === 0;
+    const count = Math.min(6, Math.max(2, np + 1));
+    for (let i = 0; i < count; i++) this.spawnWeaponPickup((i - (count - 1) / 2) * 34, -5, randomWeapon(this.room, boss ? 1 : 0));
+    this.spawnHeart(-60, -25); if (np >= 3) this.spawnHeart(60, -25);
+    for (const h of this.heroes) if (!h.alive) h.revive(3);
+    const go = this.App.create("portal"); go.transform.setPosition(0, ARENA_H / 2 - 32);
+    go.addComponent(new DrawRenderer(ctx => {
+      const t = performance.now() / 1000, r = 13 + Math.sin(t * 4) * 1.5;
+      ctx.strokeStyle = "#80deea"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.stroke();
+      ctx.fillStyle = "#4dd0e1"; ctx.globalAlpha = 0.25 + this.portalT * 0.5; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1; ctx.scale(1, -1); ctx.fillStyle = "#fff"; ctx.font = "6px monospace"; ctx.textAlign = "center"; ctx.fillText("다음 방", 0, 22);
+    }, 30, { order: 1 }));
+    this.portal = go;
+    Events.emit("room.cleared", { room: this.room });
+  }
+  gameOver() { this.state = "over"; this.overTimer = 6; }
+  restart() {
+    for (const h of this.heroes) { h.weapon = { id: "sword", tier: 0 }; h.kills = 0; h.hp = h.maxHp; h.alive = true; h.invuln = 0; }
+    this.startRoom(1);
+  }
+
+  // ---------- 플레이어 ----------
+  addHero(keyboard = false) {
+    const id = this.nextId++;
+    const go = this.App.create("hero" + id);
+    go.transform.setPosition((Math.random() - 0.5) * 40, -ARENA_H / 2 + 25);
+    const h = go.addComponent(new Hero(this, id)); h.setup(); h.keyboard = keyboard;
+    this.heroes.push(h);
+    if (this.state === "clear") h.revive(h.maxHp);
+    return h;
+  }
+  removeHero(h) { h.gameObject.destroy(); this.heroes = this.heroes.filter(x => x !== h); }
+
+  _keyboard() {
+    if (Input.getKeyDown("KeyK") && !this.heroes.some(h => h.keyboard)) this.addHero(true);
+    const h = this.heroes.find(x => x.keyboard); if (!h) return;
+    const k = c => (Input.getKey(c) ? 1 : 0);
+    Object.assign(h.input, { mx: k("KeyD") - k("KeyA"), my: k("KeyW") - k("KeyS"), atk: k("KeyJ") || k("Space"), dash: k("KeyL") || k("ShiftLeft") });
+  }
+
+  update(dt) {
+    this._keyboard();
+    this.enemies = this.enemies.filter(e => !e.gameObject.isDestroyed);
+    this.projs = this.projs.filter(p => !p.gameObject.isDestroyed);
+    this.pickups = this.pickups.filter(p => !p.gameObject.isDestroyed);
+    this.introTimer -= dt;
+    if (this.heroes.length) {
+      if (this.state === "fight") {
+        if (this.enemies.length === 0) this.clearRoom();
+        else if (this.heroes.every(h => !h.alive)) this.gameOver();
+      } else if (this.state === "clear") this._updatePortal(dt);
+      else if (this.state === "over") { this.overTimer -= dt; if (this.overTimer <= 0) this.restart(); }
+    }
+    this._sendStatus(dt);
+    this._updateHud();
+  }
+  _updatePortal(dt) {
+    const alive = this.heroes.filter(h => h.alive); if (!alive.length) return;
+    const inside = alive.filter(h => Math.hypot(h.transform.position.x, h.transform.position.y - (ARENA_H / 2 - 32)) < 16).length;
+    if (inside >= Math.ceil(alive.length / 2)) this.portalT += dt / 1.5; else this.portalT = Math.max(0, this.portalT - dt);
+    if (this.portalT >= 1) this.startRoom(this.room + 1);
   }
 
   // ---------- HUD ----------
@@ -21,84 +161,21 @@ class Game extends Component {
     return go.addComponent(new UIText("", opts));
   }
   _buildHud() {
-    this.hudScore = this._text("score", { fontSize: 10, align: "left", verticalAlign: "top" }, rt => rt.setAnchor(0, 0, 1, 0).setPivot(0, 0).setOffsets(8, 6, 0, 0));
-    this.hudRoom = this._text("room", { fontSize: 9, align: "right", verticalAlign: "top", color: "#9ab" }, rt => rt.setAnchor(0, 0, 1, 0).setPivot(0, 0).setOffsets(0, 6, 8, 0));
-    this.hudCenter = this._text("center", { fontSize: 16, wrap: true, color: "#fff" }, rt => rt.setAnchor(0, 0, 1, 1).setOffsets(20, 20, 20, 20));
-    this.hudPlayers = this._text("players", { fontSize: 8, align: "left", verticalAlign: "bottom", wrap: true }, rt => rt.setAnchor(0, 0, 1, 1).setOffsets(8, 0, 0, 6));
+    this.hudTop = this._text("top", { fontSize: 9, align: "left", verticalAlign: "top" }, rt => rt.setAnchor(0, 0, 1, 0).setPivot(0, 0).setOffsets(8, 6, 0, 0));
+    this.hudRoom = this._text("room", { fontSize: 8, align: "right", verticalAlign: "top", color: "#9ab" }, rt => rt.setAnchor(0, 0, 1, 0).setPivot(0, 0).setOffsets(0, 6, 8, 0));
+    this.hudCenter = this._text("center", { fontSize: 15, wrap: true }, rt => rt.setAnchor(0, 0, 1, 1).setOffsets(20, 20, 20, 20));
+    this.hudHeroes = this._text("heroes", { fontSize: 7, align: "left", verticalAlign: "bottom", wrap: true }, rt => rt.setAnchor(0, 0, 1, 1).setOffsets(8, 0, 8, 5));
   }
   _updateHud() {
-    const total = this.ships.reduce((a, s) => a + s.score, 0);
-    this.hudScore.setText(`SCORE ${total}   WAVE ${this.wave}`);
+    this.hudTop.setText(`ROOM ${this.room}${this.room % 5 === 0 ? "  ★BOSS" : ""}   남은 적 ${this.enemies.length}`);
     this.hudRoom.setText(this.roomCode ? `방 코드 ${this.roomCode}` : "");
-    this.hudPlayers.setText(this.ships.map(s => `P${s.id + 1} ${s.alive ? "♥".repeat(s.hp) : "💀 부활 " + Math.ceil(s.respawn) + "초"}  ${s.score}`).join("   "));
-    if (!this.ships.length) this.hudCenter.setText(this.roomCode ? `폰으로 접속하세요\n방 코드: ${this.roomCode}\n(키보드: K 키로 1P 참가 — WASD 이동, 방향키 조준)` : "서버 연결 중...");
-    else if (this.state === "over") this.hudCenter.setText(`GAME OVER\n점수 ${total}\n${Math.ceil(this.overTimer)}초 후 재시작`);
-    else this.hudCenter.setText("");
-  }
-
-  get wave() { return 1 + Math.floor(this.time / 20); }
-
-  // ---------- 플레이어 ----------
-  addShip(keyboard = false) {
-    const id = this.nextId++;
-    const go = this.App.create("ship" + id);
-    go.transform.setPosition((Math.random() - 0.5) * 60, (Math.random() - 0.5) * 40);
-    const ship = go.addComponent(new Ship(this, id, PLAYER_COLORS[id % PLAYER_COLORS.length]));
-    ship.keyboard = keyboard;
-    this.ships.push(ship);
-    return ship;
-  }
-  removeShip(ship) { ship.gameObject.destroy(); this.ships = this.ships.filter(s => s !== ship); }
-
-  spawnBullet(owner, angle) {
-    const go = this.App.create("bullet"), p = owner.transform.position;
-    go.transform.setPosition(p.x + Math.cos(angle) * 8, p.y + Math.sin(angle) * 8);
-    go.addComponent(new Bullet(this, owner, angle));
-  }
-  spawnEnemy() {
-    const w = this.wave, r = Math.random();
-    const type = w >= 3 && r < 0.15 ? "tank" : w >= 2 && r < 0.45 ? "runner" : "grunt";
-    // 아레나 바깥 가장자리 한 곳에서 등장
-    const side = Math.floor(Math.random() * 4), hw = ARENA_W / 2, hh = ARENA_H / 2;
-    const x = side < 2 ? (side ? hw : -hw) : (Math.random() * 2 - 1) * hw;
-    const y = side < 2 ? (Math.random() * 2 - 1) * hh : (side === 2 ? hh : -hh);
-    const go = this.App.create("enemy"); go.transform.setPosition(x, y);
-    this.enemies.push(go.addComponent(new Enemy(this, type)));
-  }
-
-  _keyboard(dt) {
-    if (Input.getKeyDown("KeyK") && !this.ships.some(s => s.keyboard)) this.addShip(true);
-    const ks = this.ships.find(s => s.keyboard); if (!ks) return;
-    const k = c => (Input.getKey(c) ? 1 : 0);
-    ks.input.mx = k("KeyD") - k("KeyA"); ks.input.my = k("KeyW") - k("KeyS");
-    ks.input.ax = k("ArrowRight") - k("ArrowLeft"); ks.input.ay = k("ArrowUp") - k("ArrowDown");
-  }
-
-  update(dt) {
-    this._keyboard(dt);
-    this.enemies = this.enemies.filter(e => !e.gameObject.isDestroyed);
-    if (this.state === "play") {
-      if (this.ships.length) {
-        this.time += dt;
-        this.spawnCd -= dt;
-        if (this.spawnCd <= 0) {
-          this.spawnCd = Math.max(0.3, 1.5 - this.wave * 0.14) / Math.sqrt(this.ships.length);
-          if (this.enemies.length < 60) this.spawnEnemy();
-        }
-        if (this.ships.every(s => !s.alive)) this._gameOver();
-      }
-    } else {
-      this.overTimer -= dt;
-      if (this.overTimer <= 0) this._restart();
-    }
-    this._sendStatus(dt);
-    this._updateHud();
-  }
-  _gameOver() { this.state = "over"; this.overTimer = 6; Events.emit("game.over", {}); }
-  _restart() {
-    for (const e of this.enemies) e.gameObject.destroy();
-    this.enemies = []; this.time = 0; this.spawnCd = 1; this.state = "play";
-    for (const s of this.ships) { s.score = 0; s.revive(); }
+    this.hudHeroes.setText(this.heroes.map(h => `P${h.id + 1} ${h.alive ? "♥".repeat(h.hp) + "♡".repeat(h.maxHp - h.hp) : "💀"} ${weaponLabel(h.weapon)} (${h.kills})`).join("    "));
+    let c = "";
+    if (!this.heroes.length) c = this.roomCode ? `폰으로 접속하세요\n방 코드: ${this.roomCode}\n(키보드: K — WASD 이동, J 공격, L 대시)` : "서버 연결 중...";
+    else if (this.state === "over") c = `GAME OVER\nROOM ${this.room} 도달\n${Math.ceil(this.overTimer)}초 후 재시작`;
+    else if (this.state === "fight" && this.introTimer > 0) c = `ROOM ${this.room}${this.room % 5 === 0 ? "\nBOSS!" : ""}`;
+    else if (this.state === "clear") c = this.introTimer > -3 ? "CLEAR!\n무기 위에 서 있으면 교체 · 포털로 이동" : "";
+    this.hudCenter.setText(c);
   }
 
   // ---------- 폰 연결 (PeerJS) ----------
@@ -118,21 +195,20 @@ class Game extends Component {
   }
   _onConn(c) {
     c.on("open", () => {
-      if (this.ships.length >= PLAYER_COLORS.length) { c.send({ t: "full" }); setTimeout(() => c.close(), 200); return; }
-      const ship = this.addShip();
-      this.conns.set(c, ship);
-      c.send({ t: "welcome", id: ship.id, color: ship.color });
+      const h = this.addHero();
+      this.conns.set(c, h);
+      c.send({ t: "welcome", id: h.id, color: h.color });
     });
     c.on("data", d => {
-      const ship = this.conns.get(c); if (!ship || !d) return;
-      if (d.t === "s") Object.assign(ship.input, { mx: +d.mx || 0, my: +d.my || 0, ax: +d.ax || 0, ay: +d.ay || 0 });
+      const h = this.conns.get(c); if (!h || !d) return;
+      if (d.t === "s") Object.assign(h.input, { mx: +d.mx || 0, my: +d.my || 0, ax: +d.ax || 0, ay: +d.ay || 0, atk: d.atk ? 1 : 0, dash: d.dash ? 1 : 0 });
     });
-    const leave = () => { const s = this.conns.get(c); if (s) { this.removeShip(s); this.conns.delete(c); } };
+    const leave = () => { const h = this.conns.get(c); if (h) { this.removeHero(h); this.conns.delete(c); } };
     c.on("close", leave); c.on("error", leave);
   }
   _sendStatus(dt) {
     this._statusCd = (this._statusCd || 0) - dt;
     if (this._statusCd > 0) return; this._statusCd = 0.2;
-    for (const [c, s] of this.conns) if (c.open) c.send({ t: "st", hp: s.hp, maxHp: s.maxHp, alive: s.alive, score: s.score, over: this.state === "over" });
+    for (const [c, h] of this.conns) if (c.open) c.send({ t: "st", hp: h.hp, maxHp: h.maxHp, alive: h.alive, weapon: weaponLabel(h.weapon), room: this.room, kills: h.kills });
   }
 }
