@@ -20,7 +20,9 @@ class Obstacle extends Component {
   _draw(ctx) {
     const w = this.w, h = this.h, hw = w / 2, hh = h / 2, hit = this.flash > 0, cracked = this.maxHp > 1 && this.hp < this.maxHp;
     if (this.kind === "void") return;
-    ctx.fillStyle = "#0006"; ctx.fillRect(-hw + 1, -hh - 1.5, w, h); // 그림자
+    ctx.fillStyle = "#0000004d"; // 그림자: 모양을 따라가는 타원/사각 (검은 네모 배경이 보이지 않게)
+    if (this.kind === "rock" || this.kind === "barrel") { ctx.beginPath(); ctx.ellipse(1, -hh * 0.55, hw * 0.95, hh * 0.45, 0, 0, 7); ctx.fill(); }
+    else ctx.fillRect(-hw + 1, -hh - 1.5, w, 3.5);
     if (this.kind === "pillar" || this.kind === "wall") {
       ctx.fillStyle = hit ? "#fff" : "#5d5d6b"; ctx.fillRect(-hw, -hh, w, h); ctx.fillStyle = "#7d7d8c"; ctx.fillRect(-hw, hh - 4, w, 4); ctx.fillStyle = "#6b6b7a"; ctx.fillRect(-hw + 3, -hh + 3, w - 6, h - 9);
       ctx.strokeStyle = "#2c2c36"; ctx.lineWidth = 1; ctx.strokeRect(-hw, -hh, w, h);
