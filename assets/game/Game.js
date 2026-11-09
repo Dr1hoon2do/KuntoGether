@@ -412,7 +412,7 @@ class Game extends Component {
     this.hudTop.setText(room ? `${this.floorNum}층 [${this.diffProfile().name}] · ${ROOM_NAMES[room.type]}${room.big ? " (큰 방)" : ""}${this.state === "fight" ? `   남은 적 ${this.enemies.length}` : ""}\n💰 ${this.gold}G (팀 공유)${SFX.unlocked ? (SFX.muted ? "   🔇 M" : "") : "   🔇 아무 키나 누르면 소리"}` : "");
     this.hudRoom.setText(this.roomCode ? `방 코드 ${this.roomCode}` : "");
     const boss = this.enemies.find(e => e.boss && !e.dead);
-    this.hudBoss.setText(boss ? `☠ ${boss.title}  ${"█".repeat(Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${"░".repeat(20 - Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${boss.invuln ? `  🛡 ${SHIELD_NAMES[boss.shieldKind] || "보호막"}` : ""}` : "");
+    this.hudBoss.setText(boss ? `☠ ${boss.title}  ${"█".repeat(Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${"░".repeat(20 - Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${boss.invuln ? `  🛡 ${SHIELD_NAMES[boss.shieldKind] || "보호막"}` : boss.ethereal ? `  🛡 ${SHIELD_NAMES.phase}` : ""}` : "");
     this.hudHeroes.setText(this.heroes.map(h => `${h.nick} ${h.alive ? "♥".repeat(h.hp) + "♡".repeat(h.maxHp - h.hp) : "💀"} ${weaponLabel(h.weapon)} ★${h.items.length}${h.active ? " " + activeLabel(h.active) : ""}`).join("    "));
     const diffHint = !this.runStarted && this.heroes.length && room && room.type === "start" ? `난이도 [${this.diffProfile().name}]  ·  키보드 1 쉬움 / 2 보통 / 3 어려움, 또는 방장 폰에서 선택 (문으로 나가면 확정)` : "";
     this.hudToast.setText(this.toastT > 0 ? this.toastText : diffHint);
