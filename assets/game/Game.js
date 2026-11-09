@@ -392,7 +392,7 @@ class Game extends Component {
     this.hudTop.setText(room ? `${this.floorNum}층 · ${ROOM_NAMES[room.type]}${room.big ? " (큰 방)" : ""}${this.state === "fight" ? `   남은 적 ${this.enemies.length}` : ""}\n💰 ${this.gold}G (팀 공유)${SFX.unlocked ? (SFX.muted ? "   🔇 M" : "") : "   🔇 아무 키나 누르면 소리"}` : "");
     this.hudRoom.setText(this.roomCode ? `방 코드 ${this.roomCode}` : "");
     const boss = this.enemies.find(e => e.boss && !e.dead);
-    this.hudBoss.setText(boss ? `☠ ${boss.title}  ${"█".repeat(Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${"░".repeat(20 - Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}` : "");
+    this.hudBoss.setText(boss ? `☠ ${boss.title}  ${"█".repeat(Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${"░".repeat(20 - Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${boss.invuln ? `  🛡 ${SHIELD_NAMES[boss.shieldKind] || "보호막"}` : ""}` : "");
     this.hudHeroes.setText(this.heroes.map(h => `${h.nick} ${h.alive ? "♥".repeat(h.hp) + "♡".repeat(h.maxHp - h.hp) : "💀"} ${weaponLabel(h.weapon)} ★${h.items.length}${h.active ? " " + activeLabel(h.active) : ""}`).join("    "));
     this.hudToast.setText(this.toastT > 0 ? this.toastText : "");
     let c = "";
