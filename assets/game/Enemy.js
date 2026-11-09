@@ -167,8 +167,8 @@ const ENEMY_DEFS = {
   knight:    { name: "화염 기사", boss: true, hp: 150, speed: 36, radius: 13, color: "#ff7043", kind: "poly", sides: 6, touch: 2, ai: "chase", resist: 0.05, armor: "crash",
     phases: [
       { at: 1, attacks: [{ type: "charge", cd: 8, windup: 0.8, dur: 1.6, speed: 205, ram: true, range: 280 }, { type: "burst", cd: 1.8, rounds: 4, interval: 0.15, count: 5, spread: 0.8, speed: 105, dmg: 1, countScale: true }, { type: "shoot", cd: 2.4, count: 5, spread: 1, speed: 92, dmg: 1, bounce: 1 }, { type: "bombard", cd: 3.6, count: 3, radius: 24, delay: 1, dmg: 2 }] },
-      { at: 0.6, attacks: [{ type: "charge", cd: 7, windup: 0.7, dur: 1.6, speed: 215, ram: true, range: 280 }, { type: "burst", cd: 1.7, rounds: 4, interval: 0.15, count: 6, spread: 1, speed: 110, dmg: 1, countScale: true }, { type: "bombard", cd: 3.2, count: 4, radius: 26, delay: 0.9, dmg: 2 }, { type: "ring", cd: 3.2, count: 16, speed: 82, dmg: 1, countScale: true, bounce: 1 }, { type: "wall", cd: 5.5, gap: 46, speed: 78, dmg: 1 }] },
-      { at: 0.3, attacks: [{ type: "charge", cd: 6, windup: 0.6, dur: 1.6, speed: 230, ram: true, range: 300 }, { type: "burst", cd: 1.6, rounds: 4, interval: 0.14, count: 6, spread: 1.1, speed: 114, dmg: 1, countScale: true }, { type: "ringgap", cd: 2.6, count: 22, gap: 48, speed: 86, dmg: 1, countScale: true }, { type: "bombard", cd: 3, count: 5, radius: 26, delay: 0.8, dmg: 2 }, { type: "wall", cd: 4.5, gap: 44, speed: 80, dmg: 1 }, { type: "shoot", cd: 2.2, count: 6, spread: 1.1, speed: 96, dmg: 1, bounce: 1 }] }] },
+      { at: 0.6, attacks: [{ type: "charge", cd: 9, windup: 0.7, dur: 1.6, speed: 215, ram: true, range: 280 }, { type: "burst", cd: 1.5, rounds: 4, interval: 0.14, count: 7, spread: 1.1, speed: 110, dmg: 1, countScale: true }, { type: "bombard", cd: 2.9, count: 5, radius: 26, delay: 0.9, dmg: 2 }, { type: "ring", cd: 3, count: 20, speed: 84, dmg: 1, countScale: true, bounce: 1 }, { type: "wall", cd: 5.5, gap: 46, speed: 78, dmg: 1 }] },
+      { at: 0.3, attacks: [{ type: "charge", cd: 8, windup: 0.6, dur: 1.6, speed: 230, ram: true, range: 300 }, { type: "burst", cd: 1.4, rounds: 4, interval: 0.13, count: 7, spread: 1.2, speed: 114, dmg: 1, countScale: true }, { type: "ringgap", cd: 2.4, count: 26, gap: 48, speed: 86, dmg: 1, countScale: true }, { type: "bombard", cd: 2.7, count: 6, radius: 26, delay: 0.8, dmg: 2 }, { type: "wall", cd: 4.5, gap: 44, speed: 80, dmg: 1 }, { type: "shoot", cd: 2.2, count: 6, spread: 1.1, speed: 96, dmg: 1, bounce: 1 }] }] },
   clown:     { name: "광대 마술사", boss: true, hp: 140, speed: 30, radius: 11, color: "#f06292", kind: "star", sides: 6, touch: 2, ai: "kite", keep: [70, 100], resist: 0.05,
     phases: [
       { at: 1, attacks: [{ type: "teleport", cd: 4.5, slam: true }, { type: "bombard", cd: 4, count: 3, radius: 24, delay: 1, dmg: 2 }, { type: "burst", cd: 2.6, rounds: 3, interval: 0.2, count: 3, spread: 0.6, speed: 90, dmg: 1, homing: 1.4 }, { type: "shoot", cd: 3, count: 3, spread: 0.6, speed: 92, dmg: 1, countScale: true }] },
@@ -212,8 +212,8 @@ const ENEMY_DEFS = {
   warlord:   { name: "전쟁군주", boss: true, hp: 190, speed: 28, radius: 16, color: "#8d6e63", kind: "poly", sides: 5, touch: 2, ai: "chase", resist: 0.3,
     phases: [
       { at: 1, attacks: [{ type: "charge", cd: 3, windup: 0.6, dur: 0.5, speed: 215, chain: 2, range: 240 }, { type: "shoot", cd: 2.2, count: 7, spread: 1.1, speed: 96, dmg: 1, countScale: true }, { type: "leap", cd: 5, windup: 0.7, radius: 42, dmg: 2, range: 280 }, { type: "burst", cd: 2.8, rounds: 3, interval: 0.2, count: 3, spread: 0.6, speed: 100, dmg: 1 }, { type: "ring", cd: 3.6, count: 12, speed: 80, dmg: 1, countScale: true, bounce: 1 }] },
-      { at: 0.6, enter: [{ type: "guard", spawn: "berserker", count: 3, timeout: 26 }], attacks: [{ type: "charge", cd: 3, windup: 0.55, dur: 0.5, speed: 225, chain: 3, range: 250 }, { type: "leap", cd: 3.2, windup: 0.65, radius: 44, dmg: 2, range: 280 }, { type: "ring", cd: 3, count: 16, speed: 84, dmg: 1, countScale: true, bounce: 1 }, { type: "wall", cd: 6, gap: 46, speed: 76, dmg: 1 }, { type: "burst", cd: 2.6, rounds: 4, interval: 0.18, count: 4, spread: 0.9, speed: 102, dmg: 1 }, { type: "shoot", cd: 2.4, count: 6, spread: 1, speed: 98, dmg: 1, countScale: true }] },
-      { at: 0.28, attacks: [{ type: "slam", cd: 2.6, windup: 0.75, radius: 50, dmg: 2, range: 85 }, { type: "leap", cd: 2.6, windup: 0.6, radius: 46, dmg: 2, range: 290 }, { type: "charge", cd: 2.6, windup: 0.5, dur: 0.5, speed: 235, chain: 3, range: 260 }, { type: "ringgap", cd: 2.6, count: 20, gap: 46, speed: 90, dmg: 1, countScale: true }, { type: "bombard", cd: 3.4, count: 5, radius: 26, delay: 0.85, dmg: 2 }, { type: "burst", cd: 2.4, rounds: 4, interval: 0.15, count: 5, spread: 1, speed: 106, dmg: 1 }, { type: "ring", cd: 3.2, count: 14, speed: 86, dmg: 1, countScale: true, bounce: 1 }] }] },
+      { at: 0.6, enter: [{ type: "guard", spawn: "berserker", count: 3, timeout: 26 }], attacks: [{ type: "charge", cd: 3, windup: 0.55, dur: 0.5, speed: 225, chain: 3, range: 250 }, { type: "leap", cd: 3.2, windup: 0.65, radius: 44, dmg: 2, range: 280 }, { type: "ring", cd: 3, count: 16, speed: 84, dmg: 1, countScale: true, bounce: 1 }, { type: "wall", cd: 6, gap: 46, speed: 76, dmg: 1 }, { type: "burst", cd: 2.4, rounds: 4, interval: 0.16, count: 5, spread: 1, speed: 104, dmg: 1 }, { type: "shoot", cd: 2.2, count: 7, spread: 1.1, speed: 100, dmg: 1, countScale: true }, { type: "rain", cd: 6, dur: 2.5, rate: 7, speed: 90 }] },
+      { at: 0.28, attacks: [{ type: "slam", cd: 2.6, windup: 0.75, radius: 50, dmg: 2, range: 85 }, { type: "leap", cd: 2.6, windup: 0.6, radius: 46, dmg: 2, range: 290 }, { type: "charge", cd: 2.6, windup: 0.5, dur: 0.5, speed: 235, chain: 3, range: 260 }, { type: "ringgap", cd: 2.6, count: 20, gap: 46, speed: 90, dmg: 1, countScale: true }, { type: "bombard", cd: 3.4, count: 5, radius: 26, delay: 0.85, dmg: 2 }, { type: "burst", cd: 2.2, rounds: 4, interval: 0.14, count: 6, spread: 1.1, speed: 108, dmg: 1 }, { type: "ring", cd: 3, count: 16, speed: 88, dmg: 1, countScale: true, bounce: 1 }, { type: "rain", cd: 5, dur: 3, rate: 9, speed: 94 }, { type: "wall", cd: 5.5, gap: 44, speed: 80, dmg: 1 }] }] },
   spider:    { name: "독거미", boss: true, hp: 150, speed: 36, radius: 13, color: "#5d4037", kind: "star", sides: 8, touch: 2, ai: "strafe", keep: [60, 90], resist: 0.05,
     phases: [
       { at: 1, attacks: [{ type: "burst", cd: 2.6, rounds: 3, interval: 0.2, count: 2, spread: 0.5, speed: 98, dmg: 1, bounce: 2 }, { type: "summon", cd: 6, spawn: "biter", count: 2, max: 5 }, { type: "shoot", cd: 2.6, count: 3, spread: 0.7, speed: 92, dmg: 1, countScale: true, wave: [14, 5] }, { type: "leap", cd: 5, windup: 0.6, radius: 36, dmg: 2, range: 260 }] },
@@ -302,10 +302,15 @@ class Enemy extends Component {
     this.ai = def.ai || "chase"; this.keep = def.keep || [60, 90]; this.atk = []; this.pendingEnter = null; this.modeIdx = -1; this.modeT = 99; this.phaseIdx = -1;
     if (def.phases) this._enterPhase(0); else this._enterMode(0);
   }
+  // 진행 중이던 동작(순간이동·도약 등)이 중간에 끊길 때 쓰는 정리: 비실체·투명·공중 상태가 남아 영구 무적이 되는 것을 막는다
+  _cancelBusy() {
+    this.busy = null; this.alpha = 1; this.lift = 0;
+    if (!this.def.phasing) this.ethereal = false; // 유령류(phasing)는 자기 주기대로 계속 깜빡인다
+  }
   _phases() { return this.def.phases; }
   _buildAtk(list) { return (list || []).map(d => ({ d, cd: d.first ?? d.cd * (0.5 + Math.random() * 0.5) })); }
   _enterPhase(i) {
-    const ph = this.def.phases[i]; this.phaseIdx = i; this.busy = null;
+    const ph = this.def.phases[i]; this.phaseIdx = i; this._cancelBusy();
     this.ai = ph.ai || this.def.ai || "chase"; this.keep = ph.keep || this.def.keep || [60, 90];
     this.atk = this._buildAtk(ph.attacks); this.pendingEnter = ph.enter ? ph.enter.slice() : null;
   }
@@ -325,7 +330,7 @@ class Enemy extends Component {
   applyStatus(stats, by) {
     if (stats.burn > 0) this.burn = { t: 3, dps: 2 * stats.burn, by, tick: 0.5 };
     if (stats.slow > 0) { this.slowT = 2.5; this.slowMul = 0.5; }
-    if (stats.stunChance > 0 && !this.boss && Math.random() < stats.stunChance) { this.stunT = 0.8; this.busy = null; }
+    if (stats.stunChance > 0 && !this.boss && Math.random() < stats.stunChance) { this.stunT = 0.8; this._cancelBusy(); }
   }
   // 탄 옵션(튕김·유도·물결) 묶음
   _bopts(d) { const o = {}; if (d.bounce) o.bounces = d.bounce; if (d.homing) o.homing = d.homing; if (d.wave) o.wave = d.wave; return o; }
@@ -517,7 +522,7 @@ class Enemy extends Component {
   }
   _crash() { // 갑옷이 깨진다
     const g = this.game, p = this.transform.position;
-    this.busy = null; this.crashStun = 1.6; if (this.def.armor === "crash") { this.crashT = 6; this.invuln = false; this.shieldKind = ""; g.toast(`${this.title}의 갑옷이 깨졌다! 지금이 기회`, 2); }
+    this._cancelBusy(); this.crashStun = 1.6; if (this.def.armor === "crash") { this.crashT = 6; this.invuln = false; this.shieldKind = ""; g.toast(`${this.title}의 갑옷이 깨졌다! 지금이 기회`, 2); }
     g.fx.emit(p.x, p.y, { count: 22, colors: ["#fff59d", "#ffb74d", "#fff"], speed: [40, 120], life: [0.25, 0.55], size: [1, 2.6], fade: true }); g.cam.shake(5, 0.35); SFX.play("boom");
     for (const at of this.atk) at.cd = Math.max(at.cd, 1.2);
   }
