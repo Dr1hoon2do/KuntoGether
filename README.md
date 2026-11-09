@@ -3,7 +3,7 @@
 TV 브라우저를 화면으로, 폰을 컨트롤러로 쓰는 멀티플레이 게임. 접속은 PeerJS, 게임 엔진은 [Kortfinite](https://github.com/Dr1hoon2do/Kortfinite)의 `KuntoGame/`을 가져다 쓴다.
 
 - `index.html` — 시작 메뉴 (TV 열기 / 방 코드 입력)
-- `tv.html` — TV 호스트. 5글자 방 코드를 보여 주고 게임을 돌린다 (`?debug`로 FPS 표시)
+- `tv.html` — TV 호스트. 5글자 방 코드를 보여 주고 게임을 돌린다 (`?debug`로 FPS 표시, `?res=540|720|1080`으로 렌더 해상도 고정. 기본은 최대 720p로 그리고 프레임이 느리면 자동으로 낮춤)
 - `pad.html` — 폰 컨트롤러. 왼쪽 = 이동, 오른쪽 터치 = 공격(드래그로 방향), 오른쪽 아래 버튼 = 대시
 - `KuntoGame/` — 엔진 원본 (문서: `KuntoGame/API.md`). `python3 tools/build_kuntogame.py`로 `kuntogame.js` 하나로 묶으면 `<script src="kuntogame.js">` 한 줄로 쓸 수 있다 (엔진을 고치면 다시 빌드)
 - `assets/main.js`, `assets/game/` — 게임 코드. **탑다운 협동 던전**: 8층, 층마다 방이 격자로 이어진다 (아이작 방식). 인원 제한 없음, 기준 2~4인

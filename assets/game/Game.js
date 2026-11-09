@@ -361,7 +361,7 @@ class Game extends Component {
     for (const h of this.heroes) if (h.conn && now - h.lastMsg > 600) Object.assign(h.input, { mx: 0, my: 0, ax: 0, ay: 0, atk: 0, dash: 0, act: 0 });
     this._updateCamera(dt, false);
     this._sendStatus(dt);
-    this._updateHud();
+    if ((this._hudT = (this._hudT || 0) - dt) <= 0) { this._hudT = 0.08; this._updateHud(); } // 글자는 초당 ~12번만 갱신 (문자열 만들기·줄바꿈 계산 절약)
   }
   // 모든 플레이어가 보이도록 가운데를 잡는다 (넘치면 가운데에 맞추고 멀리 있는 플레이어는 화면 밖). 방 경계 밖은 안 보여 준다.
   _updateCamera(dt, snap) {

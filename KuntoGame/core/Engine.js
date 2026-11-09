@@ -6,6 +6,9 @@ class Engine {
     this.ctx = this.canvas.getContext('2d', { alpha: options.alpha ?? false });
     this.clearColor = options.clearColor ?? '#000000';
     this.pixelRatio = options.pixelRatio ?? 1;
+    this._wantRatio = this.pixelRatio;           // 원하는 배율 (maxWidth/maxHeight 때문에 pixelRatio가 더 작아질 수 있다)
+    this.maxWidth = options.maxWidth ?? 0;       // 캔버스 가로 해상도 상한(device px, 0=제한 없음). TV처럼 큰 화면에서 채우기 비용을 줄인다
+    this.maxHeight = options.maxHeight ?? 0;
     this.imageSmoothing = options.imageSmoothing ?? false;
     this.pauseOnBlur = options.pauseOnBlur ?? true;
 
@@ -151,8 +154,13 @@ class Engine {
     const rect = this.canvas.getBoundingClientRect
       ? this.canvas.getBoundingClientRect()
       : { width: this.canvas.width, height: this.canvas.height };
-    const w = Math.max(1, Math.round((rect.width || this.canvas.width) * this.pixelRatio));
-    const h = Math.max(1, Math.round((rect.height || this.canvas.height) * this.pixelRatio));
+    const cw = rect.width || this.canvas.width, ch = rect.height || this.canvas.height;
+    let k = this._wantRatio;
+    if (this.maxWidth > 0) k = Math.min(k, this.maxWidth / cw);
+    if (this.maxHeight > 0) k = Math.min(k, this.maxHeight / ch);
+    this.pixelRatio = k;
+    const w = Math.max(1, Math.round(cw * k));
+    const h = Math.max(1, Math.round(ch * k));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
