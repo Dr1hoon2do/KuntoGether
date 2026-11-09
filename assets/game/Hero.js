@@ -221,7 +221,7 @@ class Hero extends Component {
     if (this.stats.extraLives > 0) { // 앙크: 부활
       this.stats.extraLives--; this.hp = Math.ceil(this.maxHp / 2); this.invuln = 2.5;
       g.fx.emit(p.x, p.y, { count: 30, colors: ["#fff59d", "#fff"], speed: [30, 110], life: [0.4, 0.8], size: [1, 2.5], fade: true });
-      g.toast(`${this.nick} 앙크로 부활!`, 2); return;
+       return;
     }
     this.alive = false; this.hp = 0; this.swing = null; this.echoes = [];
     g.fx.emit(p.x, p.y, { count: 28, colors: [this.color, "#fff"], speed: [20, 120], life: [0.4, 0.9], size: [1, 3], fade: true });

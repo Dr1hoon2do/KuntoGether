@@ -460,15 +460,14 @@ class Enemy extends Component {
     // ---- 보호막 상태 ----
     if (this.guardT > 0) {
       this.guardT -= dt;
-      if (!g.enemies.some(e => e.guardOf === this && !e.dead && !e.gameObject.isDestroyed)) { this.guardT = 0; g.toast(`${this.title}의 보호막이 사라졌다!`, 1.8); SFX.play("clear"); }
-      else if (this.guardT <= 0) { g.toast(`${this.title}의 보호막이 시간이 다 돼 사라졌다`, 1.5); }
+      if (!g.enemies.some(e => e.guardOf === this && !e.dead && !e.gameObject.isDestroyed)) { this.guardT = 0;  SFX.play("clear"); }
     }
-    if (this.crashT > 0) { this.crashT -= dt; if (this.crashT <= 0) { g.toast(`${this.title}의 갑옷이 다시 단단해졌다`, 1.5); } }
+    if (this.crashT > 0) this.crashT -= dt;
     const armorUp = def.armor === "crash" && this.crashT <= 0, casting = !!(this.busy && this.busy.d && this.busy.d.shield);
     this.invuln = this.guardT > 0 || armorUp || casting;
     this.shieldKind = this.guardT > 0 ? (this.guardKind || "guard") : armorUp ? "armor" : casting ? "cast" : "";
     this.draw.opacity = this.alpha * (this.ethereal ? 0.35 : 1);
-    if (this.boss) { const next = def.phases[this.phaseIdx + 1]; if (next && this.hp / this.maxHp <= next.at) { this._enterPhase(this.phaseIdx + 1); g.cam.shake(4, 0.4); g.toast(`${this.title} 격노!`, 1.5); SFX.play("boom"); } }
+    if (this.boss) { const next = def.phases[this.phaseIdx + 1]; if (next && this.hp / this.maxHp <= next.at) { this._enterPhase(this.phaseIdx + 1); g.cam.shake(4, 0.4);  SFX.play("boom"); } }
     else if (def.modes && !this.busy && (this.modeT -= dt) <= 0) { const n = def.modes.length; this._enterMode(n > 2 ? (this.modeIdx + 1 + Math.floor(Math.random() * (n - 1))) % n : (this.modeIdx + 1) % n); }
     let target = null, td = Infinity;
     for (const h of g.heroes) { if (!h.alive) continue; const hp = h.transform.position, d = Math.hypot(hp.x - p.x, hp.y - p.y); if (d < td) { td = d; target = h; } }
@@ -523,7 +522,7 @@ class Enemy extends Component {
   }
   _crash() { // 갑옷이 깨진다
     const g = this.game, p = this.transform.position;
-    this._cancelBusy(); this.crashStun = 1.6; if (this.def.armor === "crash") { this.crashT = 6; this.invuln = false; this.shieldKind = ""; g.toast(`${this.title}의 갑옷이 깨졌다! 지금이 기회`, 2); }
+    this._cancelBusy(); this.crashStun = 1.6; if (this.def.armor === "crash") { this.crashT = 6; this.invuln = false; this.shieldKind = "";  }
     g.fx.emit(p.x, p.y, { count: 22, colors: ["#fff59d", "#ffb74d", "#fff"], speed: [40, 120], life: [0.25, 0.55], size: [1, 2.6], fade: true }); g.cam.shake(5, 0.35); SFX.play("boom");
     for (const at of this.atk) at.cd = Math.max(at.cd, 1.2);
   }
@@ -574,17 +573,17 @@ class Enemy extends Component {
       case "guard": { // 수호자 소환 + 본체 무적 (수호자를 모두 처치하면 해제)
         const n = this._count(d);
         for (let i = 0; i < n; i++) { const a = i * Math.PI * 2 / n + 0.5, [x, y] = this._clampPos(p.x + Math.cos(a) * (this.radius + 36), p.y + Math.sin(a) * (this.radius + 36), 12); g.spawnEnemy(d.spawn, x, y, { delay: 0.6, guardOf: this, parent: this }); }
-        this.guardT = d.timeout || 25; this.guardKind = "guard"; this.invuln = true; this.shieldKind = "guard"; g.toast(`${this.title}이(가) 수호자를 불렀다! 모두 처치하라`, 2.5); SFX.play("warn"); at.cd = d.cd || 99; break;
+        this.guardT = d.timeout || 25; this.guardKind = "guard"; this.invuln = true; this.shieldKind = "guard";  SFX.play("warn"); at.cd = d.cd || 99; break;
       }
       case "orbshield": { // 보스 주위를 도는 보호 구체: 전부 부수면 해제 (닿으면 아프다)
         const n = this._count(d), a0 = Math.random() * 6;
         for (let i = 0; i < n; i++) g.spawnEnemy("shieldorb", p.x, p.y, { delay: 0.3, guardOf: this, parent: this, orbit: { r: this.radius + (d.radius || 34), w: d.spin || 2, a0: a0 + i * Math.PI * 2 / n } });
-        this.guardT = d.timeout || 26; this.guardKind = "orb"; this.invuln = true; this.shieldKind = "orb"; g.toast(`${this.title}이(가) 구체로 몸을 감쌌다! 도는 구체를 부숴라`, 2.5); SFX.play("warn"); at.cd = d.cd || 99; break;
+        this.guardT = d.timeout || 26; this.guardKind = "orb"; this.invuln = true; this.shieldKind = "orb";  SFX.play("warn"); at.cd = d.cd || 99; break;
       }
       case "crystals": { // 방 모서리에 수정이 솟아남: 전부 파괴하면 해제
         const n = Math.min(4, this._count(d)), hw = ARENA.w / 2 - 45, hh = ARENA.h / 2 - 38, spots = [[-hw, hh], [hw, hh], [-hw, -hh], [hw, -hh]];
         for (let i = 0; i < n; i++) { const [x, y] = spots[i]; g.spawnEnemy("crystal", x, y, { delay: 0.6, guardOf: this, parent: this }); }
-        this.guardT = d.timeout || 40; this.guardKind = "crystal"; this.invuln = true; this.shieldKind = "crystal"; g.toast(`${this.title}이(가) 수정과 연결됐다! 수정을 모두 파괴하라`, 2.5); SFX.play("warn"); at.cd = d.cd || 99; break;
+        this.guardT = d.timeout || 40; this.guardKind = "crystal"; this.invuln = true; this.shieldKind = "crystal";  SFX.play("warn"); at.cd = d.cd || 99; break;
       }
       case "heal": {
         let any = false;

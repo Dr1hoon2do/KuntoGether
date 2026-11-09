@@ -71,24 +71,24 @@ class Pickup extends Component {
     const g = this.game, it = this.item, p = this.transform.position;
     if (this.lock > 0) return false;
     const price = it.price > 0 ? this._price() : 0;
-    if (it.type === "heart" && h.hp >= h.maxHp) { this._deny(h, "HP가 가득 찼어요"); return false; }
-    if (it.price > 0 && g.gold < price) { this._deny(h, `골드가 부족해요 (${price}G 필요, 보유 ${g.gold}G)`); return false; }
+    if (it.type === "heart" && h.hp >= h.maxHp) { this._deny(h); return false; }
+    if (it.price > 0 && g.gold < price) { this._deny(h); return false; }
     if (it.price > 0) { g.gold -= price; if (g.cur) g.cur.shopUsed = true; } // 골드는 팀 공유
     g.fx.emit(p.x, p.y, { count: 12, colors: ["#ffd54f", "#fff"], speed: [20, 70], life: [0.3, 0.6], size: [1, 2], fade: true });
     if (it.type === "heart") { h.heal(1); h.heartBuffOn = true; SFX.play("swap"); if (--it.stock <= 0) this.gameObject.destroy(); return true; } // 상점 하트: 인원수만큼 살 수 있다
     SFX.play(it.type === "weapon" ? "swap" : "item");
     if (it.type === "active") { // 액티브: 들고 있던 것은 바닥에 떨어진다 (충전 상태 유지)
       const old = h.active; h.setActive(it.id, it.state);
-      g.toast(`${h.nick} 획득(액티브): ${ACTIVES[it.id].name} — ${ACTIVES[it.id].desc}`, 3);
+      
       if (old) { g._makePickup({ type: "active", id: old.id, state: { charge: old.charge, cdLeft: old.cdLeft }, price: 0, x: p.x, y: p.y - 14, lock: 1.5 }); }
       this.gameObject.destroy(); return true;
     }
-    if (it.type === "item") { h.giveItem(it.id); g.toast(`${h.nick} 획득: ${PASSIVES[it.id].name} — ${PASSIVES[it.id].desc}`, 3); this.gameObject.destroy(); return true; }
+    if (it.type === "item") { h.giveItem(it.id);  this.gameObject.destroy(); return true; }
     // 무기
     const old = h.weapon; h.weapon = it.weapon;
     if (it.price > 0) { g.spawnWeaponPickup(p.x, p.y - 14, old, 0, 1.5); this.gameObject.destroy(); } // 산 무기: 원래 무기는 근처에 공짜로 떨어짐
     else { it.weapon = old; this.lock = 1.5; }
     return true;
   }
-  _deny(h, text) { this.lock = 0.6; this.game.toast(`${h.nick}: ${text}`, 1.6); SFX.play("block"); }
+  _deny() { this.lock = 0.6; SFX.play("block"); }
 }
