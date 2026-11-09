@@ -1,6 +1,6 @@
 // ============================================================================
 // 패시브 아이템 / 액티브 아이템
-// 등급(tier)은 3단계: 1=일반(12G) 2=희귀(18G) 3=영웅(24G). 가격은 등급으로 고정이고 층이 올라도 오르지 않는다.
+// 등급(tier)은 3단계: 1=일반(24G) 2=희귀(36G) 3=영웅(48G). 가격은 등급으로 고정이고 층이 올라도 오르지 않는다.
 // 이름·모양(icon)은 효과와 관련 없어도 된다. 새 아이템은 PASSIVES에 한 줄 추가하면 보물방·상점·보스 보상에 자동으로 섞인다.
 //
 // 패시브 apply(hero)는 그 플레이어의 hero.stats만 바꾼다(플레이어별 적용). 단, "골드 관련" stats는 파티 전체가 합쳐서 쓴다:
@@ -9,32 +9,39 @@
 // stats: speed·atkSpeed·dmg·range·knock·dashCd·dashPower·gold·discount(배율), lifesteal·crit·dodge·execute·doubleSwing·coinDrop·heartDrop·stunChance·roomHeal(확률),
 //        thorns·beam·berserk·reflect·roomGold·burn·slow·leech·explode·extraShots·deflect(2=반사, 근접 공격만; 기본은 상쇄), extraLives,
 //        invuln(피격 후 무적 추가 초)·entryInvuln(방 입장 무적 초)·killInvuln(적 처치 시 무적 초), pierce·compass(bool)
+//   특색 효과: dmgMelee/dmgRanged(근접/원거리 전용 공격력 배율)·noHitDmg(방에서 안 맞았을 때 공격력)·sprint(방 입장 후 5초 이동 속도)·moveAtk(이동 중 공격 속도)·dashAtk(대시 후 2초 공격 속도)·
+//        critReset(치명타 시 쿨다운 초기화)·arcMul(근접 범위 각도)·critDmg(치명타 피해 추가 배수)·dashInvuln(대시 무적 추가 초)·dodgeShock(회피 시 충격파)·dashDmg(대시로 지나간 적 피해)·dashCancel(대시 중 탄 제거)·
+//        heartBuff(하트를 먹으면 그 방 공격력)·fullHpAtk(HP 가득일 때 공격 속도) / [파티] coinDouble·eliteGold·interest·crateGold·autoCoin·firstHalf·shopExtra
 // ============================================================================
 const newStats = () => ({ speed: 1, atkSpeed: 1, dmg: 1, range: 1, knock: 1, dashCd: 1, dashPower: 1, gold: 1, discount: 1,
   lifesteal: 0, crit: 0, dodge: 0, execute: 0, doubleSwing: 0, coinDrop: 0, heartDrop: 0, stunChance: 0, roomHeal: 0,
   thorns: 0, beam: 0, berserk: 0, reflect: 0, roomGold: 0, burn: 0, slow: 0, leech: 0, explode: 0, extraShots: 0, deflect: 0,
-  extraLives: 0, invuln: 0, entryInvuln: 0, killInvuln: 0, pierce: false, compass: false });
+  extraLives: 0, invuln: 0, entryInvuln: 0, killInvuln: 0, pierce: false, compass: false,
+  // 특색 있는 효과용
+  dmgMelee: 1, dmgRanged: 1, noHitDmg: 0, sprint: 0, moveAtk: 0, dashAtk: 0, critReset: false, arcMul: 0, critDmg: 0, dashInvuln: 0, dodgeShock: 0,
+  dashDmg: 0, dashCancel: false, heartBuff: 0, fullHpAtk: 0,
+  coinDouble: 0, eliteGold: 0, interest: 0, crateGold: 0, autoCoin: false, firstHalf: false, shopExtra: 0 });
 const ITEM_TIERS = [null,
-  { name: "일반", price: 12, color: "#e8e8e8", weight: 5 },
-  { name: "희귀", price: 18, color: "#4fc3f7", weight: 3 },
-  { name: "영웅", price: 24, color: "#ce93d8", weight: 1.4 }];
+  { name: "일반", price: 24, color: "#e8e8e8", weight: 5 },
+  { name: "희귀", price: 36, color: "#4fc3f7", weight: 3 },
+  { name: "영웅", price: 48, color: "#ce93d8", weight: 1.4 }];
 
 const PASSIVES = {
   // ================= 일반 (12G) =================
-  onion:      { tier: 1, icon: "🧅", name: "양파",         desc: "공격력 +5%, HP 1 회복",              apply: h => { h.stats.dmg *= 1.05; h.heal(1); } },
-  oldboots:   { tier: 1, icon: "👢", name: "낡은 장화",     desc: "이동 속도 +10%",                    apply: h => { h.stats.speed *= 1.10; } },
-  ribbon:     { tier: 1, icon: "🎀", name: "빨간 리본",     desc: "공격 속도 +10%",                    apply: h => { h.stats.atkSpeed *= 1.10; } },
-  stick:      { tier: 1, icon: "🪵", name: "쪼개진 막대",   desc: "사거리 +10%",                      apply: h => { h.stats.range *= 1.10; } },
+  onion:      { tier: 1, icon: "🧅", name: "양파",         desc: "방에 들어간 뒤 한 번도 안 맞았다면 공격력 +15%", apply: h => { h.stats.noHitDmg += 0.15; } },
+  oldboots:   { tier: 1, icon: "👢", name: "낡은 장화",     desc: "방에 들어간 뒤 5초간 이동 속도 +40%",  apply: h => { h.stats.sprint += 0.4; } },
+  ribbon:     { tier: 1, icon: "🎀", name: "빨간 리본",     desc: "대시한 뒤 2초간 공격 속도 +35%",       apply: h => { h.stats.dashAtk += 0.35; } },
+  stick:      { tier: 1, icon: "🪵", name: "쪼개진 막대",   desc: "근접 공격의 범위(각도) +25%",         apply: h => { h.stats.arcMul += 0.25; } },
   irondust:   { tier: 1, icon: "⚙️", name: "철가루",        desc: "넉백 +30%",                        apply: h => { h.stats.knock *= 1.3; } },
   nail:       { tier: 1, icon: "📌", name: "구부러진 못",   desc: "방에 들어갈 때 무적 5초",            apply: h => { h.stats.entryInvuln = Math.max(h.stats.entryInvuln, 3.8); } },
   miniheart:  { tier: 1, icon: "💗", name: "작은 심장",     desc: "최대 HP +1, HP 1 회복",             apply: h => { h.maxHp += 1; h.heal(1); } },
-  tack:       { tier: 1, icon: "📍", name: "압정",         desc: "치명타 +8%",                       apply: h => { h.stats.crit += 0.08; } },
+  tack:       { tier: 1, icon: "📍", name: "압정",         desc: "치명타 +5%, 치명타 피해 2배 → 2.5배",   apply: h => { h.stats.crit += 0.05; h.stats.critDmg += 0.5; } },
   purse:      { tier: 1, icon: "👛", name: "동전 지갑",     desc: "[파티] 코인 드랍 확률 +5%p",         apply: h => { h.stats.coinDrop += 0.05; } },
   oldbook:    { tier: 1, icon: "📖", name: "낡은 책",       desc: "[파티] 상점 가격 -10%",             apply: h => { h.stats.discount *= 0.9; } },
-  acorn:      { tier: 1, icon: "🌰", name: "도토리",       desc: "[파티] 방 클리어마다 +1G",           apply: h => { h.stats.roomGold += 1; } },
-  plume:      { tier: 1, icon: "🪶", name: "깃털 장식",     desc: "대시 거리 +20%",                   apply: h => { h.stats.dashPower *= 1.2; } },
-  bone:       { tier: 1, icon: "🦴", name: "뼈다귀",       desc: "적 처치 시 하트 드랍 확률 +1%",      apply: h => { h.stats.heartDrop += 0.01; } },
-  balloon:    { tier: 1, icon: "🎈", name: "풍선",         desc: "6% 확률로 피해 무효",               apply: h => { h.stats.dodge += 0.06; } },
+  acorn:      { tier: 1, icon: "🌰", name: "도토리",       desc: "[파티] 상자·폭발 통을 부수면 코인 +2G 확정", apply: h => { h.stats.crateGold += 2; } },
+  plume:      { tier: 1, icon: "🪶", name: "깃털 장식",     desc: "대시하는 동안 주변 적 탄을 지운다",    apply: h => { h.stats.dashCancel = true; } },
+  bone:       { tier: 1, icon: "🦴", name: "뼈다귀",       desc: "하트를 먹으면 그 방에서 공격력 +10%",  apply: h => { h.stats.heartBuff += 0.10; } },
+  balloon:    { tier: 1, icon: "🎈", name: "풍선",         desc: "대시 무적 시간 +0.25초",             apply: h => { h.stats.dashInvuln += 0.25; } },
   shiny:      { tier: 1, icon: "💎", name: "반짝이는 돌",   desc: "[파티] 획득 골드 +15%",             apply: h => { h.stats.gold *= 1.15; } },
   twig:       { tier: 1, icon: "🌿", name: "마른 가지",     desc: "대시 재사용 시간 -15%",             apply: h => { h.stats.dashCd *= 0.85; } },
   sock:       { tier: 1, icon: "🧦", name: "낡은 양말",     desc: "피격 후 무적 +0.3초",               apply: h => { h.stats.invuln += 0.3; } },
@@ -50,16 +57,18 @@ const PASSIVES = {
   shell:      { tier: 2, icon: "🐚", name: "가시 껍질",     desc: "맞으면 주변 적에게 피해·넉백",        apply: h => { h.stats.thorns += 1; } },
   lens:       { tier: 2, icon: "🔍", name: "렌즈",         desc: "원거리 무기 탄 +1",                 apply: h => { h.stats.extraShots += 1; } },
   arrowhead:  { tier: 2, icon: "🏹", name: "관통 화살촉",   desc: "원거리 탄이 적을 관통",              apply: h => { h.stats.pierce = true; } },
-  clover:     { tier: 2, icon: "🍀", name: "네잎 클로버",   desc: "[파티] 획득 골드 +30%, 코인 드랍 +5%p", apply: h => { h.stats.gold *= 1.3; h.stats.coinDrop += 0.05; } },
-  piggy:      { tier: 2, icon: "🐷", name: "저금통",       desc: "[파티] 방 클리어마다 +2G",           apply: h => { h.stats.roomGold += 2; } },
-  coupon:     { tier: 2, icon: "🎫", name: "쿠폰",         desc: "[파티] 상점 가격 -20%",             apply: h => { h.stats.discount *= 0.8; } },
+  clover:     { tier: 2, icon: "🍀", name: "네잎 클로버",   desc: "[파티] 코인이 15% 확률로 2배",        apply: h => { h.stats.coinDouble += 0.15; } },
+  looter:     { tier: 2, icon: "🎒", name: "도굴꾼 주머니", desc: "[파티] 코인 드랍 +8%, 떨어진 코인이 바로 팀 골드로", apply: h => { h.stats.coinDrop += 0.08; h.stats.autoCoin = true; } },
+  piggy:      { tier: 2, icon: "🐷", name: "저금통",       desc: "[파티] 방 클리어마다 보유 골드의 10% 이자(최대 +5G)", apply: h => { h.stats.interest += 1; } },
+  coupon:     { tier: 2, icon: "🎫", name: "쿠폰",         desc: "[파티] 상점에서 처음 사는 물건 반값",   apply: h => { h.stats.firstHalf = true; } },
   berserk:    { tier: 2, icon: "🩸", name: "광전사의 피",   desc: "HP가 낮을수록 공격력 최대 +60%",     apply: h => { h.stats.berserk += 0.6; } },
   glass:      { tier: 2, icon: "🥂", name: "유리 대포",     desc: "최대 HP -2, 공격력 +50%",           apply: h => { h.maxHp = Math.max(2, h.maxHp - 2); h.hp = Math.min(h.hp, h.maxHp); h.stats.dmg *= 1.5; } },
-  sneakers:   { tier: 2, icon: "👟", name: "운동화",       desc: "이동 속도 +18%",                    apply: h => { h.stats.speed *= 1.18; } },
-  ring:       { tier: 2, icon: "💍", name: "신속의 반지",   desc: "공격 속도 +18%",                    apply: h => { h.stats.atkSpeed *= 1.18; } },
-  glove:      { tier: 2, icon: "🥊", name: "힘의 장갑",     desc: "공격력 +20%",                      apply: h => { h.stats.dmg *= 1.2; } },
-  band:       { tier: 2, icon: "🪢", name: "질풍의 띠",     desc: "대시 재사용 시간 -30%",             apply: h => { h.stats.dashCd *= 0.7; } },
-  charm:      { tier: 2, icon: "🧿", name: "푸른 눈 부적",  desc: "12% 확률로 피해 무효",              apply: h => { h.stats.dodge += 0.12; } },
+  sneakers:   { tier: 2, icon: "👟", name: "운동화",       desc: "이동하는 동안 공격 속도 +20%",         apply: h => { h.stats.moveAtk += 0.2; } },
+  ring:       { tier: 2, icon: "💍", name: "신속의 반지",   desc: "치명타가 터지면 공격 쿨다운 즉시 초기화", apply: h => { h.stats.critReset = true; } },
+  glove:      { tier: 2, icon: "🥊", name: "힘의 장갑",     desc: "근접 무기 공격력 +30%",               apply: h => { h.stats.dmgMelee *= 1.3; } },
+  archglove:  { tier: 2, icon: "🧤", name: "사수의 장갑",   desc: "원거리 무기 공격력 +30%",             apply: h => { h.stats.dmgRanged *= 1.3; } },
+  band:       { tier: 2, icon: "🪢", name: "질풍의 띠",     desc: "대시로 지나간 적에게 피해",           apply: h => { h.stats.dashDmg += 1; } },
+  charm:      { tier: 2, icon: "🧿", name: "푸른 눈 부적",  desc: "12% 확률로 피해 무효, 무효 시 충격파(적 밀침·탄 제거)", apply: h => { h.stats.dodge += 0.12; h.stats.dodgeShock += 1; } },
   compass:    { tier: 2, icon: "🧭", name: "나침반",       desc: "[파티] 미니맵에 층 전체가 보임",      apply: h => { h.stats.compass = true; } },
   incense:    { tier: 2, icon: "🪔", name: "치유의 향로",   desc: "방 클리어 시 25% 확률로 HP +1",      apply: h => { h.stats.roomHeal += 0.25; } },
   pole:       { tier: 2, icon: "📏", name: "장대",         desc: "사거리 +20%",                      apply: h => { h.stats.range *= 1.2; } },
@@ -75,9 +84,9 @@ const PASSIVES = {
   sigil:      { tier: 3, icon: "☯️", name: "흡혈 문양",     desc: "15번 맞힐 때마다 HP +1",             apply: h => { h.stats.leech += 1; } },
   mirror:     { tier: 3, icon: "🪞", name: "반사 거울",     desc: "근접 공격이 적 탄을 되받아친다",      apply: h => { h.stats.deflect = 2; } },
   ankh:       { tier: 3, icon: "☥",  name: "앙크",         desc: "죽으면 1회 부활",                   apply: h => { h.stats.extraLives += 1; } },
-  bigheart:   { tier: 3, icon: "❤️", name: "체력의 심장",   desc: "최대 HP +2, HP 1 회복",             apply: h => { h.maxHp += 2; h.heal(1); } },
-  goldtooth:  { tier: 3, icon: "🪙", name: "황금 이빨",     desc: "[파티] 획득 골드 +50%, 코인 드랍 +10%p", apply: h => { h.stats.gold *= 1.5; h.stats.coinDrop += 0.10; } },
-  haggler:    { tier: 3, icon: "🛒", name: "상인의 안목",   desc: "[파티] 상점 가격 -30%",             apply: h => { h.stats.discount *= 0.7; } },
+  bigheart:   { tier: 3, icon: "❤️", name: "체력의 심장",   desc: "최대 HP +2, HP가 가득이면 공격 속도 +12%", apply: h => { h.maxHp += 2; h.heal(1); h.stats.fullHpAtk += 0.12; } },
+  goldtooth:  { tier: 3, icon: "🪙", name: "황금 이빨",     desc: "[파티] 획득 골드 +40%, 엘리트 처치 시 코인 +4G", apply: h => { h.stats.gold *= 1.4; h.stats.eliteGold += 4; } },
+  haggler:    { tier: 3, icon: "🛒", name: "상인의 안목",   desc: "[파티] 상점 가격 -30%, 상점 품목 +2개", apply: h => { h.stats.discount *= 0.7; h.stats.shopExtra += 2; } },
   basket:     { tier: 3, icon: "🧺", name: "과일 바구니",   desc: "최대 HP +1, 공격 속도 +15%, 이동 +8%", apply: h => { h.maxHp += 1; h.heal(1); h.stats.atkSpeed *= 1.15; h.stats.speed *= 1.08; } },
   skull:      { tier: 3, icon: "💀", name: "수정 해골",     desc: "공격력 +15%, 치명타 +10%, 화상",     apply: h => { h.stats.dmg *= 1.15; h.stats.crit += 0.10; h.stats.burn += 1; } },
 };
@@ -126,4 +135,4 @@ const randomActiveId = (exclude = new Set()) => {
   return ids[0];
 };
 // 무기 가격은 등급(5단계)으로 고정
-const weaponPrice = w => [12, 18, 24, 32, 44][w.tier];
+const weaponPrice = w => [24, 36, 48, 64, 88][w.tier];

@@ -681,8 +681,12 @@ class Enemy extends Component {
     if (def.onDeath && !quiet) for (let i = 0; i < def.onDeath.count; i++) { const a = i * 3.14 + Math.random(); g.spawnEnemy(def.onDeath.spawn, p.x + Math.cos(a) * 8, p.y + Math.sin(a) * 8, { delay: 0.2 }); }
     const bonus = g.partySum("coinDrop"); // 골드 관련 아이템은 파티 전체에 적용
     if (!this.boss && !quiet && !def.noDrop && (def.gold || bonus > 0) && (this.elite || Math.random() < ((def.goldChance ?? 0) + bonus) * BALANCE.coinRate)) {
-      const [lo, hi] = def.gold || [1, 1], n = (lo + Math.floor(Math.random() * (hi - lo + 1))) * (this.elite ? 2 : 1);
-      g.spawnCoin(p.x, p.y, n);
+      const [lo, hi] = def.gold || [1, 1];
+      let n = (lo + Math.floor(Math.random() * (hi - lo + 1))) * (this.elite ? 2 : 1);
+      if (Math.random() < g.partySum("coinDouble")) n *= 2; // 네잎 클로버
+      if (this.elite) n += g.partySum("eliteGold"); // 황금 이빨
+      if (g.partyAny("autoCoin")) { g.addGold(n); g.fx.emit(p.x, p.y, { count: 4, colors: ["#ffca28", "#fff"], speed: [10, 40], life: [0.2, 0.4], size: [1, 1.6], fade: true }); SFX.play("coin"); } // 도굴꾼 주머니: 바로 팀 골드로
+      else g.spawnCoin(p.x, p.y, n);
     }
     if (by) by.kills++;
     Events.emit("enemy.killed", { enemy: this, by });

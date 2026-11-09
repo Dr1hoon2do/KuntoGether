@@ -4,7 +4,11 @@ class Pickup extends Component {
     super();
     this.game = game; this.item = item; this.lock = item.lock ?? 0.8; this.t = Math.random() * 6; this.near = null;
   }
-  _price() { const base = this.item.price || 0; return base > 0 ? Math.max(1, Math.ceil(base * this.game.partyMul("discount"))) : base; } // 상점 할인(파티 전체 합산) 반영
+  _price() { // 상점 할인(파티 전체 합산) + 쿠폰(상점에서 처음 사는 물건 반값)
+    const base = this.item.price || 0; if (!(base > 0)) return base; const g = this.game;
+    let pr = base * g.partyMul("discount"); if (g.partySum("firstHalf") > 0 && g.cur && !g.cur.shopUsed) pr *= 0.5;
+    return Math.max(1, Math.ceil(pr));
+  }
   data() { const p = this.transform.position; return { ...this.item, x: p.x, y: p.y, lock: 0.8 }; }
   setup() {
     this.draw = this.gameObject.addComponent(new DrawRenderer(ctx => this._draw(ctx), 22, { order: 1 }));
@@ -56,7 +60,7 @@ class Pickup extends Component {
       return;
     }
     if (it.type === "heart" && !(it.price > 0)) {
-      if (near && nd < 10 && near.hp < near.maxHp) { near.heal(1); SFX.play("swap"); g.fx.emit(p.x, p.y, { count: 8, colors: ["#ef5350", "#fff"], speed: [10, 40], life: [0.3, 0.5], size: [1, 2], fade: true }); this.gameObject.destroy(); }
+      if (near && nd < 10 && near.hp < near.maxHp) { near.heal(1); near.heartBuffOn = true; SFX.play("swap"); g.fx.emit(p.x, p.y, { count: 8, colors: ["#ef5350", "#fff"], speed: [10, 40], life: [0.3, 0.5], size: [1, 2], fade: true }); this.gameObject.destroy(); }
       return;
     }
     // 무기·패시브·상점 하트: 가까이 가면 정보만 표시. 획득·구매는 공격(터치)할 때 Game.tryInteract → interact()
@@ -69,9 +73,9 @@ class Pickup extends Component {
     const price = it.price > 0 ? this._price() : 0;
     if (it.type === "heart" && h.hp >= h.maxHp) { this._deny(h, "HP가 가득 찼어요"); return false; }
     if (it.price > 0 && g.gold < price) { this._deny(h, `골드가 부족해요 (${price}G 필요, 보유 ${g.gold}G)`); return false; }
-    if (it.price > 0) g.gold -= price; // 골드는 팀 공유
+    if (it.price > 0) { g.gold -= price; if (g.cur) g.cur.shopUsed = true; } // 골드는 팀 공유
     g.fx.emit(p.x, p.y, { count: 12, colors: ["#ffd54f", "#fff"], speed: [20, 70], life: [0.3, 0.6], size: [1, 2], fade: true });
-    if (it.type === "heart") { h.heal(1); SFX.play("swap"); if (--it.stock <= 0) this.gameObject.destroy(); return true; } // 상점 하트: 인원수만큼 살 수 있다
+    if (it.type === "heart") { h.heal(1); h.heartBuffOn = true; SFX.play("swap"); if (--it.stock <= 0) this.gameObject.destroy(); return true; } // 상점 하트: 인원수만큼 살 수 있다
     SFX.play(it.type === "weapon" ? "swap" : "item");
     if (it.type === "active") { // 액티브: 들고 있던 것은 바닥에 떨어진다 (충전 상태 유지)
       const old = h.active; h.setActive(it.id, it.state);

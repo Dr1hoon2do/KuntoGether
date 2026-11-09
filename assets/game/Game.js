@@ -1,5 +1,5 @@
 // 던전 진행: 층 → 방(문으로 이동) → 전투/보물/상점/보스, 아이템·골드, HUD, 폰 접속 처리
-const HEART_PRICE = 4; // 상점 하트 가격 (고정)
+const HEART_PRICE = 8; // 상점 하트 가격 (고정)
 class Game extends Component {
   constructor(App) {
     super();
@@ -70,6 +70,7 @@ class Game extends Component {
   }
   // ---------- 파티(골드 관련 아이템은 모두에게 적용) ----------
   partySum(k) { let a = 0; for (const h of this.heroes) a += h.stats[k] || 0; return a; }
+  partyAny(k) { return this.heroes.some(h => h.stats[k]); }
   partyMul(k) { let a = 1; for (const h of this.heroes) a *= h.stats[k]; return a; }
   addGold(n) { const v = Math.max(1, Math.round(n * this.partyMul("gold"))); this.gold += v; return v; }
   puff(h, colors) { const p = h.transform.position; this.fx.emit(p.x, p.y, { count: 10, colors, speed: [20, 70], life: [0.2, 0.45], size: [1, 2], fade: true }); }
@@ -170,7 +171,8 @@ class Game extends Component {
     this.heroes.forEach((h, i) => { // 들어온 문 앞에 모여서 시작
       const gap = Math.min(20, 150 / Math.max(1, n)), off = (i - (n - 1) / 2) * gap;
       const [x, y] = side === "S" ? [dx0 + off, dy0 + 24] : side === "N" ? [dx0 + off, dy0 - 24] : side === "W" ? [dx0 + 24, dy0 + off] : [dx0 - 24, dy0 + off];
-      h.transform.setPosition(x, y); h.invuln = Math.max(h.invuln, 1.2 + h.stats.entryInvuln); h.swing = null; h.echoes = []; h.cd = 0; h.kx = h.ky = 0;
+      h.transform.setPosition(x, y); h.invuln = Math.max(h.invuln, 1.2 + h.stats.entryInvuln); h.swing = null; h.echoes = [];
+      h.roomT = 0; h.hitThisRoom = false; h.heartBuffOn = false; // 방마다 초기화되는 조건부 효과(양파·낡은 장화·뼈다귀) h.cd = 0; h.kx = h.ky = 0;
     });
     this._updateCamera(0, true);
     this.introTimer = 2.2; this.introText = `${this.floorNum}층 — ${ROOM_NAMES[room.type]}${room.big ? ` (큰 방 ${room.cells.length}칸)` : ""}`;
@@ -226,7 +228,7 @@ class Game extends Component {
   }
   // 상점: (1~3) + 인원수x2 개의 품목. 하트(4G)가 나오면 인원수만큼 살 수 있다. 가격은 등급으로 고정(일반 12 / 희귀 18 / 영웅 24).
   _stockShop(np) {
-    const n = Math.min(24, 1 + Math.floor(Math.random() * 3) + np * 2), takenP = this._heldItems(), takenA = this._heldActives();
+    const n = Math.min(30, 1 + Math.floor(Math.random() * 3) + np * 2 + 2 * this.partySum("shopExtra")), takenP = this._heldItems(), takenA = this._heldActives();
     const list = [];
     if (Math.random() < 0.6) list.push({ type: "heart", price: HEART_PRICE, stock: np });
     const rest = n - list.length, items = Math.ceil(rest * 0.55);
@@ -243,7 +245,8 @@ class Game extends Component {
       if (h.alive && h.stats.roomHeal && Math.random() < h.stats.roomHeal) h.heal(1);
       const a = h.active; if (a && ACTIVES[a.id].kind === "charge") a.charge = Math.min(ACTIVES[a.id].max, a.charge + (big ? 2 : 1));
     }
-    const rg = this.partySum("roomGold"); if (rg > 0) this.addGold(rg); // 저금통·도토리: 파티 전체 합산
+    const rg = this.partySum("roomGold"); if (rg > 0) this.addGold(rg); // 방 클리어 보너스: 파티 전체 합산
+    for (let k = 0; k < Math.round(this.partySum("interest")); k++) { const itr = Math.min(5, Math.floor(this.gold * 0.1)); if (itr > 0) { this.gold += itr; this.toast(`저금통 이자 +${itr}G`, 1.5); } } // 저금통: 이자
     const rand = (a, b) => a + Math.random() * (b - a), cm = big ? 1.5 : 1;
     if (room.type === "normal") {
       if (Math.random() < 0.15 * cm) this.spawnHeart(rand(-40, 40), rand(-20, 20)); // 회복은 박하다

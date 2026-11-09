@@ -17,15 +17,24 @@ class Hero extends Component {
   resetRun() { // 새 게임을 시작할 때 초기화 (닉네임·pid는 유지)
     this.maxHp = 6; this.hp = 6; this.kills = 0; this.items = []; this.stats = newStats(); this.active = null; this.moveT = 0; this.moveMul = 1;
     this.weapon = { id: "sword", tier: 0 }; this.leechN = 0; this.regenT = 0; this.echoes = [];
+    this.roomT = 99; this.hitThisRoom = false; this.heartBuffOn = false; this.dashAt = -1e9; this.moving = false; this.dashHit = new Set();
   }
   setup() {
     this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), 18, { order: 5 }));
   }
   // 아이템 효과가 반영된 현재 무기 능력치
   getWeapon() {
-    const b = WEAPONS[this.weapon.id], t = TIERS[this.weapon.tier], s = this.stats;
-    const berserk = 1 + s.berserk * (1 - Math.max(0, this.hp) / this.maxHp);
-    return { ...b, dmg: b.dmg * t.mult * s.dmg * berserk, range: b.range * s.range, cd: b.cd / s.atkSpeed, knock: b.knock * s.knock, tier: this.weapon.tier };
+    const b = WEAPONS[this.weapon.id], t = TIERS[this.weapon.tier], s = this.stats, now = performance.now();
+    let dmg = s.dmg * (b.ranged ? s.dmgRanged : s.dmgMelee);
+    dmg *= 1 + s.berserk * (1 - Math.max(0, this.hp) / this.maxHp);
+    if (s.noHitDmg && !this.hitThisRoom) dmg *= 1 + s.noHitDmg;       // 양파: 방에서 안 맞았다면
+    if (s.heartBuff && this.heartBuffOn) dmg *= 1 + s.heartBuff;       // 뼈다귀: 하트를 먹었다면
+    let spd = s.atkSpeed;
+    if (s.moveAtk && this.moving) spd *= 1 + s.moveAtk;               // 운동화: 이동 중
+    if (s.dashAtk && now - this.dashAt < 2000) spd *= 1 + s.dashAtk;  // 빨간 리본: 대시 직후
+    if (s.fullHpAtk && this.hp >= this.maxHp) spd *= 1 + s.fullHpAtk; // 체력의 심장: HP 가득
+    const arc = b.ranged ? b.arc : Math.min(360, (b.arc || 0) * (1 + s.arcMul)); // 쪼개진 막대: 근접 범위
+    return { ...b, arc, dmg: b.dmg * t.mult * dmg, range: b.range * s.range, cd: b.cd / spd, knock: b.knock * s.knock, tier: this.weapon.tier };
   }
   get gold() { return this.game.gold; }            // 골드는 팀 전체가 공유한다
   set gold(v) { this.game.gold = v; }
@@ -57,7 +66,7 @@ class Hero extends Component {
   update(dt) {
     if (!this.alive) return;
     const g = this.game, i = this.input, t = this.transform, s = this.stats;
-    this.invuln -= dt; this.cd -= dt; this.dashCd -= dt; this.moveT -= dt;
+    this.invuln -= dt; this.cd -= dt; this.dashCd -= dt; this.moveT -= dt; this.roomT += dt;
     if (this.active && this.active.cdLeft > 0) this.active.cdLeft = Math.max(0, this.active.cdLeft - dt);
     if (i.act && !this.prevAct) this.useActive();
     this.prevAct = i.act;
@@ -66,17 +75,23 @@ class Hero extends Component {
 
     let mx = i.mx, my = i.my; const ml = Math.hypot(mx, my);
     if (ml > 1) { mx /= ml; my /= ml; }
+    this.moving = ml > 0.2;
     if (ml > 0.15) this.facing = Math.atan2(my, mx);
 
     if (i.dash && !this.prevDash && this.dashCd <= 0 && this.dashT <= 0) { // 대시: 짧은 무적
-      this.dashT = 0.16; this.dashCd = 0.7 * s.dashCd; this.invuln = Math.max(this.invuln, 0.2);
+      this.dashT = 0.16; this.dashCd = 0.7 * s.dashCd; this.invuln = Math.max(this.invuln, 0.2 + s.dashInvuln); this.dashAt = performance.now(); this.dashHit = new Set();
       this.dashDir = ml > 0.15 ? Math.atan2(my, mx) : this.facing;
       g.fx.emit(t.position.x, t.position.y, { count: 6, colors: [this.color, "#fff"], speed: [10, 40], life: [0.15, 0.3], size: [1, 2], fade: true });
     }
     this.prevDash = i.dash;
 
-    let vx = mx * 82 * s.speed, vy = my * 82 * s.speed;
+    const sprint = s.sprint && this.roomT < 5 ? 1 + s.sprint : 1; // 낡은 장화: 방에 들어간 직후
+    let vx = mx * 82 * s.speed * sprint, vy = my * 82 * s.speed * sprint;
     if (this.dashT > 0) { this.dashT -= dt; vx = Math.cos(this.dashDir) * 230 * s.dashPower; vy = Math.sin(this.dashDir) * 230 * s.dashPower; }
+    if (this.dashT > 0) { // 대시 중: 질풍의 띠(지나간 적에게 피해) · 깃털 장식(탄 제거)
+      if (s.dashDmg) for (const e of g.enemies) { if (e.dead || e.spawnDelay > 0 || this.dashHit.has(e)) continue; const ep = e.transform.position; if (Math.hypot(ep.x - t.position.x, ep.y - t.position.y) < e.radius + 9) { this.dashHit.add(e); const dm = 3 * s.dmg * s.dashDmg; e.damage(dm, this, Math.atan2(ep.y - t.position.y, ep.x - t.position.x), 160); this.applyHitEffects(e, dm); } }
+      if (s.dashCancel) g.cancelProjectiles(t.position.x, t.position.y, 18);
+    }
     if (this.moveT > 0 && this.dashT <= 0) { vx *= this.moveMul; vy *= this.moveMul; } // 공격하는 동안 무기별로 조금 느려진다
     vx += this.kx; vy += this.ky; this.kx *= Math.max(0, 1 - 9 * dt); this.ky *= Math.max(0, 1 - 9 * dt);
     const p = t.position;
@@ -119,7 +134,8 @@ class Hero extends Component {
   _strike(dir, w, isEcho) {
     if (w.ranged) return this._fire(dir, w, isEcho);
     const g = this.game, p = this.transform.position, s = this.stats;
-    const dmg = w.dmg * (Math.random() < s.crit ? 2 : 1), half = (w.arc * Math.PI / 180) / 2;
+    const crit = Math.random() < s.crit, dmg = w.dmg * (crit ? 2 + s.critDmg : 1), half = (w.arc * Math.PI / 180) / 2;
+    if (crit && s.critReset) this.cd = 0; // 신속의 반지
     const inArc = (x, y, pad) => {
       const dx = x - p.x, dy = y - p.y, d = Math.hypot(dx, dy);
       if (d > w.range + pad) return false;
@@ -152,7 +168,8 @@ class Hero extends Component {
   // 원거리 무기 발사
   _fire(dir, w, isEcho) {
     const g = this.game, p = this.transform.position, s = this.stats;
-    const dmg = w.dmg * (Math.random() < s.crit ? 2 : 1);
+    const crit = Math.random() < s.crit, dmg = w.dmg * (crit ? 2 + s.critDmg : 1);
+    if (crit && s.critReset) this.cd = 0;
     const n = (w.count || 1) + s.extraShots, spread = w.arc ? w.arc * Math.PI / 180 : 0.2 * (n - 1);
     const angs = Array.from({ length: n }, (_, i) => (n === 1 ? dir : dir + (i - (n - 1) / 2) * (spread / (n - 1))));
     SFX.play("shoot");
@@ -183,9 +200,9 @@ class Hero extends Component {
     if (!this.alive || this.invuln > 0) return;
     const g = this.game, s = this.stats, p = this.transform.position;
     if (Math.random() < Math.min(0.6, s.dodge)) { // 회피 부적
-      this.invuln = 0.4; g.fx.emit(p.x, p.y, { count: 6, colors: ["#fff", this.color], speed: [20, 50], life: [0.2, 0.4], size: [1, 1.6], fade: true }); return;
+      this.invuln = 0.4; if (s.dodgeShock) g.shockwave(p.x, p.y, 40, 3 * s.dodgeShock, 160, this); g.fx.emit(p.x, p.y, { count: 6, colors: ["#fff", this.color], speed: [20, 50], life: [0.2, 0.4], size: [1, 1.6], fade: true }); return;
     }
-    this.hp -= n; this.invuln = 1.0 + s.invuln; this.draw.flash = 0.1;
+    this.hp -= n; this.invuln = 1.0 + s.invuln; this.draw.flash = 0.1; this.hitThisRoom = true;
     Events.emit("hero.hit", { hero: this }); SFX.play("hurt");
     const a = Math.atan2(p.y - fromY, p.x - fromX);
     this.kx = Math.cos(a) * kb; this.ky = Math.sin(a) * kb; this.swing = null;
