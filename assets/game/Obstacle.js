@@ -1,3 +1,7 @@
+// 물리 레이어 (KuntoGame Physics). Solid = 캐릭터·탄이 부딪히는 것 (방 벽 + 지형지물)
+const PL = { Wall: Physics.layer("Wall"), Obstacle: Physics.layer("Obstacle"), Hero: Physics.layer("Hero"), Enemy: Physics.layer("Enemy"), EProj: Physics.layer("EProj"), Pickup: Physics.layer("Pickup") };
+PL.Solid = PL.Wall | PL.Obstacle;
+const ROCK_R = 9; // 바위의 모서리 반지름 (그림과 충돌 모양이 같다)
 // 지형지물: 움직임과 탄을 막는다.
 //   pillar : 기둥(안 부서짐)           wall : 긴 기둥(안 부서짐, 엄폐용)
 //   rock   : 바위 — 폭발(폭탄·폭발 통·폭발 구슬)로만 부서짐
@@ -14,6 +18,8 @@ class Obstacle extends Component {
   get destructible() { return this.kind === "crate" || this.kind === "barrel" || this.kind === "rock"; }
   setup() {
     this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), Math.max(this.w, this.h) + 6, { order: 2 }));
+    const o = { layer: "Obstacle", body: "static", data: this }; // 충돌 모양 = 그려지는 모양
+    this.col = this.gameObject.addComponent(this.kind === "barrel" ? Collider2D.circle(this.w / 2, o) : this.kind === "rock" ? Collider2D.rbox(this.w, this.h, ROCK_R, o) : Collider2D.box(this.w, this.h, o));
   }
   data() { const p = this.transform.position; return { kind: this.kind, w: this.w, h: this.h, hp: this.hp, x: p.x, y: p.y }; }
   update(dt) { if (this.flash > 0) this.flash -= dt; }
@@ -25,9 +31,10 @@ class Obstacle extends Component {
       ctx.fillStyle = hit ? "#fff" : "#5d5d6b"; ctx.fillRect(-hw, -hh, w, h); ctx.fillStyle = "#7d7d8c"; ctx.fillRect(-hw, hh - 4, w, 4); ctx.fillStyle = "#6b6b7a"; ctx.fillRect(-hw + 3, -hh + 3, w - 6, h - 9);
       ctx.strokeStyle = "#2c2c36"; ctx.lineWidth = 1; ctx.strokeRect(-hw, -hh, w, h);
     } else if (this.kind === "rock") {
+      const rr = ROCK_R; // 둥근 상자: 충돌 모양과 똑같다
       ctx.fillStyle = hit ? "#fff" : "#7b6a58"; ctx.beginPath();
-      const n = 7; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, j = 0.78 + 0.22 * Math.sin(this.seed + i * 2.1); ctx.lineTo(Math.cos(a) * hw * j * 1.05, Math.sin(a) * hh * j * 1.05); } ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = "#3e342a"; ctx.lineWidth = 1; ctx.stroke(); ctx.strokeStyle = "#a08c76"; ctx.beginPath(); ctx.moveTo(-hw * 0.4, -hh * 0.3); ctx.lineTo(hw * 0.1, -hh * 0.5); ctx.stroke();
+      ctx.moveTo(-hw + rr, -hh); ctx.arc(hw - rr, -hh + rr, rr, -Math.PI / 2, 0); ctx.arc(hw - rr, hh - rr, rr, 0, Math.PI / 2); ctx.arc(-hw + rr, hh - rr, rr, Math.PI / 2, Math.PI); ctx.arc(-hw + rr, -hh + rr, rr, Math.PI, Math.PI * 1.5); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "#3e342a"; ctx.lineWidth = 1; ctx.stroke(); ctx.strokeStyle = "#a08c76"; ctx.beginPath(); ctx.moveTo(-hw * 0.4, -hh * 0.3); ctx.lineTo(hw * 0.1, -hh * 0.5); ctx.moveTo(hw * 0.2, hh * 0.35); ctx.lineTo(hw * 0.55, hh * 0.1); ctx.stroke();
     } else if (this.kind === "crate") {
       ctx.fillStyle = hit ? "#fff" : "#a47532"; ctx.fillRect(-hw, -hh, w, h); ctx.strokeStyle = "#5a3d14"; ctx.lineWidth = 1; ctx.strokeRect(-hw, -hh, w, h);
       ctx.beginPath(); ctx.moveTo(-hw, -hh); ctx.lineTo(hw, hh); ctx.moveTo(hw, -hh); ctx.lineTo(-hw, hh); ctx.stroke();

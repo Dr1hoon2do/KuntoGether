@@ -4275,7 +4275,7 @@ class SpriteAnimator extends Component {
 //   Physics.overlapCapsule(ax, ay, bx, by, halfWidth, mask, arr)    // 굵은 선분(레이저)
 //   Physics.castCircle(x, y, r, dx, dy, mask, out, filter, ctx)     // 원을 (dx,dy)만큼 쏘아 가장 먼저 맞는 콜라이더
 //   Physics.raycast(x, y, dx, dy, mask, out)                        // 반지름 0 캐스트
-//   컴포넌트에 onTriggerEnter(other) / onTriggerExit(other) / onCollisionEnter(other) 를 두면 프레임 끝에 호출된다.
+//   컴포넌트에 onTriggerEnter/Stay/Exit(other) · onCollisionEnter/Stay/Exit(other) 를 두면 프레임 끝에 호출된다.
 
 const PHYS_EPS = 1e-6;
 const PHYS_SKIN = 0.02;      // 막힌 면에서 띄우는 간격 (떨림 방지)
@@ -4316,6 +4316,8 @@ class Collider2D extends Component {
   static circle(r, opts) { return new Collider2D('circle', r, 0, opts); }
   static box(w, h, opts) { return new Collider2D('box', w, h, opts); }
   static capsule(length, r, opts) { return new Collider2D('capsule', length, r, opts); }
+  // 모서리가 둥근 상자 (w x h, 모서리 반지름 cr). 바위처럼 각진 데가 없는 모양에 쓴다.
+  static rbox(w, h, cr, opts) { const c = new Collider2D('rbox', w, h, opts); c.radius = Math.min(cr, w / 2, h / 2); return c; }
 
   setRadius(r) { this.radius = r; this.sync(true); return this; }
   setSize(w, h) { this.w = w; if (h !== undefined) this.h = h; this.sync(true); return this; }
@@ -4336,6 +4338,7 @@ class Collider2D extends Component {
     this.cx = cx; this.cy = cy; this.cos = cs; this.sin = sn;
     if (this.shape === 'circle') { this.hx = 0; this.hy = 0; this.rr = this.radius; }
     else if (this.shape === 'box') { this.hx = this.w / 2; this.hy = this.h / 2; this.rr = 0; }
+    else if (this.shape === 'rbox') { this.hx = this.w / 2 - this.radius; this.hy = this.h / 2 - this.radius; this.rr = this.radius; }
     else { this.hx = this.w / 2; this.hy = 0; this.rr = this.radius; }
     const ex = Math.abs(cs) * this.hx + Math.abs(sn) * this.hy + this.rr, ey = Math.abs(sn) * this.hx + Math.abs(cs) * this.hy + this.rr;
     this.minX = cx - ex; this.maxX = cx + ex; this.minY = cy - ey; this.maxY = cy + ey;
@@ -4380,7 +4383,8 @@ class Physics {
   static _matrix = [-1];                   // _matrix[a] = a가 부딪히는 레이어 비트들
   static _grid = new Map();                // key → Collider2D[]
   static _all = [];                        // 등록된 모든 콜라이더
-  static _moving = [];                     // body !== 'static' 인 것 (프레임 시작에 sync)
+  static _moving = [];
+  static _evt = [];                        // 이벤트 콜백을 가진 콜라이더만 (프레임 끝 트리거 판정 대상)                     // body !== 'static' 인 것 (프레임 시작에 sync)
   static _stamp = 1;
   static hits = [];                        // 질의 결과 기본 버퍼 (쓰기 전에 길이는 호출이 돌려주는 n을 믿을 것)
   static _tmpOut = { x: 0, y: 0, hit: false, nx: 0, ny: 0, t: 1, collider: null };
@@ -4405,17 +4409,20 @@ class Physics {
   // ---- 등록 / 격자 ----
   static _key(gx, gy) { return (gx + PHYS_OFF) * PHYS_STRIDE + (gy + PHYS_OFF); }
   static _add(c) {
-    if (c._registered) return; c._registered = true; Physics._all.push(c);
-    if (c.body !== 'static') Physics._moving.push(c);
+    if (c._registered) return; c._registered = true; c._ai = Physics._all.length; Physics._all.push(c);
+    if (c.body !== 'static') { c._mi = Physics._moving.length; Physics._moving.push(c); } else c._mi = -1;
+    c.events = false; const comps = c._gameObject && c._gameObject._components;
+    if (comps) for (let i = 0; i < comps.length; i++) { const k = comps[i]; if (typeof k.onTriggerEnter === 'function' || typeof k.onTriggerStay === 'function' || typeof k.onCollisionStay === 'function' || typeof k.onTriggerExit === 'function' || typeof k.onCollisionEnter === 'function' || typeof k.onCollisionExit === 'function') c.events = true; }
+    if (c.events) { c._ei = Physics._evt.length; Physics._evt.push(c); } else c._ei = -1;
     c._gx0 = 1; c._gx1 = 0; Physics._rehash(c);
   }
   static _remove(c) {
     if (!c._registered) return; c._registered = false;
     Physics._unhash(c);
-    let i = Physics._all.indexOf(c); if (i >= 0) { Physics._all[i] = Physics._all[Physics._all.length - 1]; Physics._all.pop(); }
-    i = Physics._moving.indexOf(c); if (i >= 0) { Physics._moving[i] = Physics._moving[Physics._moving.length - 1]; Physics._moving.pop(); }
+    Physics._swapRemove(Physics._all, c, '_ai'); if (c._mi >= 0) Physics._swapRemove(Physics._moving, c, '_mi'); if (c._ei >= 0) Physics._swapRemove(Physics._evt, c, '_ei');
     if (c._touch) { for (const o of c._touch) Physics._pairs.delete(Physics._pairKey(c, o)); c._touch.clear(); }
   }
+  static _swapRemove(arr, c, key) { const i = c[key], last = arr.pop(); if (last !== c) { arr[i] = last; last[key] = i; } c[key] = -1; }
   static _unhash(c) {
     for (let gx = c._gx0; gx <= c._gx1; gx++) for (let gy = c._gy0; gy <= c._gy1; gy++) {
       const arr = Physics._grid.get(Physics._key(gx, gy)); if (!arr) continue;
@@ -4452,7 +4459,7 @@ class Physics {
     for (let gx = x0; gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) {
       const arr = grid.get((gx + PHYS_OFF) * PHYS_STRIDE + (gy + PHYS_OFF)); if (!arr) continue;
       for (let i = 0; i < arr.length; i++) {
-        const c = arr[i]; if (c._q === st || !c.active || !(c.bit & mask)) continue;
+        const c = arr[i]; if (c._q === st || !c.active || !(c.bit & mask) || c._gameObject._destroyed) continue;
         c._q = st; out.push(c);
       }
     }
@@ -4682,31 +4689,31 @@ class Physics {
   static _pairKey(a, b) { return a._id < b._id ? a._id * 1048576 + b._id : b._id * 1048576 + a._id; }
   static _nextId = 1;
   static _dispatch() {
-    const mv = Physics._moving, pairs = Physics._pairs; if (!mv.length) return;
+    const mv = Physics._evt, pairs = Physics._pairs; if (!mv.length) { if (pairs.size) pairs.clear(); return; }
     const st = ++Physics._stamp;
     for (let i = 0; i < mv.length; i++) {
-      const a = mv[i]; if (!a.active || !a._gameObject) continue;
+      const a = mv[i]; if (!a.active || !a._gameObject || a._gameObject._destroyed) continue;
       if (a._id === undefined) a._id = Physics._nextId++;
       const cand = Physics._gather(a.minX, a.minY, a.maxX, a.maxY, a.mask);
       for (let j = 0; j < cand.length; j++) {
         const b = cand[j]; if (b === a) continue;
         if (b._id === undefined) b._id = Physics._nextId++;
-        if (b.body !== 'static' && b._id < a._id) continue; // 움직이는 쌍은 한 번만
+        if (b.events && b._id < a._id) continue; // 둘 다 이벤트 대상이면 한 번만
         if (!Physics.canCollide(a, b)) continue;
         if (!Physics._shapeOverlap(a, b)) continue;
         const k = Physics._pairKey(a, b);
         let p = pairs.get(k);
-        if (!p) { p = { a, b, seen: 0, trig: a.isTrigger || b.isTrigger }; pairs.set(k, p); Physics._fire(p, true); }
-        p.seen = st;
+        if (!p) { p = { a, b, seen: 0, trig: a.isTrigger || b.isTrigger }; pairs.set(k, p); p.seen = st; Physics._fire(p, 1); }
+        else { p.seen = st; Physics._fire(p, 2); } // 2 = 머무는 중 (onTriggerStay / onCollisionStay)
       }
     }
     for (const [k, p] of pairs) if (p.seen !== st) {
       // 이번 프레임에 안 보였으면 종료 — 단, 둘 중 하나가 비활성/제거여도 종료
-      pairs.delete(k); Physics._fire(p, false);
+      pairs.delete(k); Physics._fire(p, 0);
     }
   }
   static _fire(p, enter) {
-    const a = p.a, b = p.b, ev = p.trig ? (enter ? 'onTriggerEnter' : 'onTriggerExit') : (enter ? 'onCollisionEnter' : 'onCollisionExit');
+    const a = p.a, b = p.b, ev = p.trig ? (enter === 1 ? 'onTriggerEnter' : enter === 2 ? 'onTriggerStay' : 'onTriggerExit') : (enter === 1 ? 'onCollisionEnter' : enter === 2 ? 'onCollisionStay' : 'onCollisionExit');
     for (let s = 0; s < 2; s++) {
       const me = s ? b : a, other = s ? a : b, go = me._gameObject; if (!go) continue;
       const comps = go._components;

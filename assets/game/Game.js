@@ -8,7 +8,7 @@ class Game extends Component {
     this.floorNum = 1; this.map = null; this.cur = null; this.state = "explore"; // explore | fight | over | victory
     this.nextId = 0; this.overTimer = 0; this.introTimer = 0; this.introText = "";
     this.doorHold = 0; this.stairsHold = 0; this.stairsGO = null; this.toastText = ""; this.toastT = 0;
-    this.usedBosses = new Set(); this.gold = 0; this.obstacles = []; this.bombs = []; // gold: 팀 공유 골드
+    this.usedBosses = new Set(); this.gold = 0; this.obstacles = []; this.walls = []; this.bombs = []; // gold: 팀 공유 골드
     this.difficulty = "normal"; this.runStarted = false; // 난이도는 첫 문으로 나가기 전(런 시작 전)에만 바꿀 수 있다
   }
   awake() {
@@ -39,7 +39,8 @@ class Game extends Component {
       const k = Math.min(1, t / dur); ctx.globalAlpha = 1 - k * k;
       ctx.fillStyle = color; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.lineCap = "round";
       if (w.kind === "thrust") {
-        const len = w.range * Math.min(1, k * 2.5 + 0.3);
+        const len = w.range * Math.min(1, k * 2.5 + 0.3), tw = Math.max(3.5, Math.min(9, w.range * half * 0.5)); // tw: 찌르기 판정 폭(Hero._strike와 같은 값)
+        ctx.save(); ctx.globalAlpha *= 0.35; ctx.lineWidth = tw * 2; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(w.range * Math.min(1, k * 2.5 + 0.3), 0); ctx.stroke(); ctx.restore(); // 굵은 선 = 실제 맞는 범위
         ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(len, 0); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(len + 5, 0); ctx.lineTo(len - 3, 3); ctx.lineTo(len - 3, -3); ctx.closePath(); ctx.fill();
       } else {
@@ -94,35 +95,34 @@ class Game extends Component {
     const go = this.App.create("obstacle_" + d.kind); go.transform.setPosition(d.x, d.y);
     const o = go.addComponent(new Obstacle(this, d)); o.setup(); this.obstacles.push(o); return o;
   }
-  _rectDist(o, x, y) { const p = o.transform.position, hw = o.w / 2, hh = o.h / 2; return Math.hypot(x - Math.max(p.x - hw, Math.min(p.x + hw, x)), y - Math.max(p.y - hh, Math.min(p.y + hh, y))); }
-  // 원(x,y,r)이 지형지물에 겹치면 밖으로 밀어낸다. [x, y, 막혔는지]
-  pushOut(x, y, r) {
-    let hit = false;
-    for (let pass = 0; pass < 2; pass++) for (const o of this.obstacles) {
-      const p = o.transform.position, hw = o.w / 2, hh = o.h / 2;
-      if (o.kind === "barrel") { const dx = x - p.x, dy = y - p.y, d = Math.hypot(dx, dy), min = hw + r; if (d < min) { hit = true; if (d > 0.001) { x += dx / d * (min - d); y += dy / d * (min - d); } else x += min; } continue; }
-      const cx = Math.max(p.x - hw, Math.min(p.x + hw, x)), cy = Math.max(p.y - hh, Math.min(p.y + hh, y)), dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy);
-      if (d < r) {
-        hit = true;
-        if (d > 0.0001) { x += dx / d * (r - d); y += dy / d * (r - d); }
-        else { const ox = hw + r - Math.abs(x - p.x), oy = hh + r - Math.abs(y - p.y); if (ox < oy) x += (x >= p.x ? 1 : -1) * ox; else y += (y >= p.y ? 1 : -1) * oy; }
-      }
+  // 방 바깥 벽: 방 전체 바운딩 박스를 둘러싼 4개의 고정 콜라이더 (L자 방의 빈 칸은 void 지형이 막는다)
+  _buildWalls() {
+    for (const w of this.walls) if (!w.isDestroyed) w.destroy();
+    this.walls = []; const T = 80, hw = ARENA.w / 2, hh = ARENA.h / 2;
+    for (const [x, y, w, h] of [[0, hh + T / 2, ARENA.w + T * 2, T], [0, -hh - T / 2, ARENA.w + T * 2, T], [hw + T / 2, 0, T, ARENA.h], [-hw - T / 2, 0, T, ARENA.h]]) {
+      const go = this.App.create("wall"); go.transform.setPosition(x, y); go.addComponent(Collider2D.box(w, h, { layer: "Wall", body: "static" })); this.walls.push(go);
     }
-    return [x, y, hit];
   }
-  obstacleAt(x, y, r) { for (const o of this.obstacles) if (this._rectDist(o, x, y) < r) return o; return null; }
+  // 원(x,y,r)이 (dx,dy)만큼 움직인다 — 벽·지형에 막히면 미끄러진다(터널링 없음). out.x/out.y/out.hit/out.collider
+  moveBody(x, y, r, dx, dy, out, self, mask = PL.Solid) { return Physics.moveCircle(x, y, r, dx, dy, mask, out, self); }
+  // 원(x,y,r)이 지형에 겹치면 밖으로 밀어낸다. [x, y, 막혔는지]
+  pushOut(x, y, r) { const o = Game._po; Physics.moveCircle(x, y, r, 0, 0, PL.Solid, o); return [o.x, o.y, o.hit]; }
+  static _po = { x: 0, y: 0, hit: false, nx: 0, ny: 0, collider: null };
+  obstacleAt(x, y, r) { const c = Physics.pointQuery(x, y, r, PL.Obstacle); return c ? c.data : null; }
   // 폭발: 적에게 eDmg, 플레이어에게 hDmg(0이면 안 다침), 범위 안의 바위·상자·통은 부서진다
   explode(x, y, r, eDmg, hDmg, src) {
-    for (const e of this.enemies) { if (e.dead || e.spawnDelay > 0) continue; const ep = e.transform.position; if (Math.hypot(ep.x - x, ep.y - y) < r + e.radius) e.damage(eDmg, src && src.stats ? src : null, Math.atan2(ep.y - y, ep.x - x), 120); }
-    if (hDmg > 0) for (const h of this.heroes) { const hp = h.transform.position; if (h.alive && Math.hypot(hp.x - x, hp.y - y) < r + h.radius) h.hit(hDmg, x, y, 160); }
-    for (const o of this.obstacles.slice()) if (o.destructible && this._rectDist(o, x, y) <= r) o.damage(99, src, true);
+    const buf = []; // 피해 중에 연쇄 폭발이 같은 질의 버퍼를 덮어쓰지 않게 새 배열을 쓴다
+    let n = Physics.overlapCircle(x, y, r, PL.Enemy, buf); for (let i = 0; i < n; i++) { const e = buf[i].data; if (e.dead || e.spawnDelay > 0) continue; const ep = e.transform.position; e.damage(eDmg, src && src.stats ? src : null, Math.atan2(ep.y - y, ep.x - x), 120); }
+    if (hDmg > 0) { n = Physics.overlapCircle(x, y, r, PL.Hero, buf); for (let i = 0; i < n; i++) { const h = buf[i].data; if (h.alive) h.hit(hDmg, x, y, 160); } }
+    n = Physics.overlapCircle(x, y, r, PL.Obstacle, buf); for (let i = 0; i < n; i++) { const o = buf[i].data; if (o.destructible) o.damage(99, src, true); }
     this.fx.emit(x, y, { count: 26, colors: ["#ff7043", "#ffee58", "#fff"], speed: [40, 130], life: [0.2, 0.5], size: [1.5, 3], fade: true, area: r * 0.3 });
     this.cam.shake(4, 0.25); SFX.play("boom");
   }
-  cancelProjectiles(x, y, r) { for (const pr of this.projs) { if (pr.fromPlayer || pr.gameObject.isDestroyed || pr.orbit) continue; const q = pr.transform.position; if (Math.hypot(q.x - x, q.y - y) < r) pr.gameObject.destroy(); } }
+  cancelProjectiles(x, y, r) { const buf = [], n = Physics.overlapCircle(x, y, r, PL.EProj, buf); for (let i = 0; i < n; i++) { const pr = buf[i].data; if (pr.fromPlayer || pr.gameObject.isDestroyed || pr.orbit) continue; pr.gameObject.destroy(); } }
   shockwave(x, y, r, dmg, knock, hero) {
     this.cancelProjectiles(x, y, r);
-    for (const e of this.enemies) { if (e.dead || e.spawnDelay > 0) continue; const ep = e.transform.position; if (Math.hypot(ep.x - x, ep.y - y) < r + e.radius) e.damage(dmg * (hero ? hero.stats.dmg : 1), hero, Math.atan2(ep.y - y, ep.x - x), knock); }
+    const buf = [], n = Physics.overlapCircle(x, y, r, PL.Enemy, buf);
+    for (let i = 0; i < n; i++) { const e = buf[i].data; if (e.dead || e.spawnDelay > 0) continue; const ep = e.transform.position; e.damage(dmg * (hero ? hero.stats.dmg : 1), hero, Math.atan2(ep.y - y, ep.x - x), knock); }
     this.fx.emit(x, y, { count: 24, colors: ["#fff", "#b3e5fc"], speed: [60, 140], life: [0.2, 0.4], size: [1, 2], fade: true, area: 4 }); this.cam.shake(3, 0.2); SFX.play("boom");
   }
   spawnBomb(x, y, owner) {
@@ -132,7 +132,7 @@ class Game extends Component {
 
   // 플레이어가 공격(터치)할 때 호출: 가까이 있는 무기·아이템·상점 하트를 획득·구매한다
   tryInteract(h) {
-    const p = h.transform.position; let best = null, bd = 20;
+    const p = h.transform.position; let best = null, bd = PICK_R + h.radius;
     for (const pk of this.pickups) {
       const t = pk.item.type; if (pk.gameObject.isDestroyed || t === "coin" || (t === "heart" && !(pk.item.price > 0))) continue;
       const q = pk.transform.position, d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = pk; }
@@ -164,6 +164,7 @@ class Game extends Component {
   }
   _clearObjects() {
     for (const o of [...this.enemies, ...this.projs, ...this.pickups, ...this.obstacles]) o.gameObject.destroy();
+    for (const w of this.walls) if (!w.isDestroyed) w.destroy(); this.walls = [];
     for (const b of this.bombs) if (!b.isDestroyed) b.destroy();
     this.enemies = []; this.projs = []; this.pickups = []; this.obstacles = []; this.bombs = [];
     if (this.stairsGO) { this.stairsGO.destroy(); this.stairsGO = null; }
@@ -180,6 +181,7 @@ class Game extends Component {
     applyGeo(room); // 방 모양(1~4칸)과 크기. 카메라 배율은 그대로
     const hw0 = ARENA.w / 2, hh0 = ARENA.h / 2; this.camFollow.bounds = { minX: -hw0, maxX: hw0, minY: -hh0, maxY: hh0 };
     if (room.obs === null) room.obs = generateObstacles(room);
+    this._buildWalls();
     for (const d of room.obs) this._makeObstacle(d);
     for (const v of ARENA.voids) this._makeObstacle({ kind: "void", x: v.x, y: v.y, w: ARENA.BASE_W, h: ARENA.BASE_H, hp: 999 }); // L자 방의 빈 칸
     const n = this.heroes.length, side = dir ? OPP[dir] : "S", [dx0, dy0] = doorPos(side);

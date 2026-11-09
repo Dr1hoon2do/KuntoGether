@@ -1,3 +1,4 @@
+const PICK_R = 11; // 안내 고리 반지름 = 상호작용 거리 (그려진 대로)
 // 바닥 아이템. type: coin(닿으면 골드, 자석) / heart(price 0이면 닿으면 회복) / weapon·item·상점 하트(가까이 가면 정보만 보이고, 공격(터치)하면 획득·교체·구매)
 class Pickup extends Component {
   constructor(game, item) {
@@ -12,6 +13,16 @@ class Pickup extends Component {
   data() { const p = this.transform.position; return { ...this.item, x: p.x, y: p.y, lock: 0.8 }; }
   setup() {
     this.draw = this.gameObject.addComponent(new DrawRenderer(ctx => this._draw(ctx), 22, { order: 1 }));
+    const it = this.item;
+    if (it.type === "coin" || (it.type === "heart" && !(it.price > 0))) // 줍는 아이템: 그려진 크기 그대로의 트리거
+      this.col = this.gameObject.addComponent(Collider2D.circle(it.type === "coin" ? 3 + Math.min(2, it.value / 4) : 5.5, { layer: "Pickup", isTrigger: true, body: "kinematic", data: this }));
+  }
+  onTriggerEnter(other) { this.onTriggerStay(other); }
+  onTriggerStay(other) {
+    const h = other.data, it = this.item, g = this.game; if (!h || !h.alive || this.gameObject.isDestroyed || !(h instanceof Hero)) return;
+    const p = this.transform.position;
+    if (it.type === "coin") { g.addGold(it.value); SFX.play("coin"); g.fx.emit(p.x, p.y, { count: 4, colors: ["#ffca28", "#fff"], speed: [10, 40], life: [0.2, 0.4], size: [1, 1.6], fade: true }); this.gameObject.destroy(); }
+    else if (it.type === "heart" && !(it.price > 0) && h.hp < h.maxHp) { h.heal(1); h.heartBuffOn = true; SFX.play("swap"); g.fx.emit(p.x, p.y, { count: 8, colors: ["#ef5350", "#fff"], speed: [10, 40], life: [0.3, 0.5], size: [1, 2], fade: true }); this.gameObject.destroy(); }
   }
   _label(ctx, text, y, color, size = 5.5) {
     ctx.save(); ctx.scale(1, -1); ctx.fillStyle = color; ctx.font = `${size}px monospace`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(text, 0, y); ctx.restore();
@@ -56,15 +67,15 @@ class Pickup extends Component {
     for (const h of g.heroes) { if (!h.alive) continue; const hp = h.transform.position, d = Math.hypot(hp.x - p.x, hp.y - p.y); if (d < nd) { nd = d; near = h; } }
     if (it.type === "coin") { // 가까우면 끌려간다
       if (near && nd < 42) { const a = Math.atan2(near.transform.position.y - p.y, near.transform.position.x - p.x), s = 90 * dt; this.transform.setPosition(p.x + Math.cos(a) * s, p.y + Math.sin(a) * s); }
-      if (near && nd < 8) { g.addGold(it.value); SFX.play("coin"); g.fx.emit(p.x, p.y, { count: 4, colors: ["#ffca28", "#fff"], speed: [10, 40], life: [0.2, 0.4], size: [1, 1.6], fade: true }); this.gameObject.destroy(); }
+      // 코인 획득은 트리거(onTriggerEnter)로: 코인 모양과 플레이어 몸이 실제로 닿았을 때
       return;
     }
     if (it.type === "heart" && !(it.price > 0)) {
-      if (near && nd < 10 && near.hp < near.maxHp) { near.heal(1); near.heartBuffOn = true; SFX.play("swap"); g.fx.emit(p.x, p.y, { count: 8, colors: ["#ef5350", "#fff"], speed: [10, 40], life: [0.3, 0.5], size: [1, 2], fade: true }); this.gameObject.destroy(); }
+      // 하트 회복도 트리거(onTriggerStay)로
       return;
     }
     // 무기·패시브·상점 하트: 가까이 가면 정보만 표시. 획득·구매는 공격(터치)할 때 Game.tryInteract → interact()
-    this.near = near && nd < 18 ? near : null;
+    this.near = near && nd < PICK_R + near.radius ? near : null; // 흰 고리(반지름 11)에 몸이 닿으면 "공격 = 획득"
   }
   // h가 이 아이템을 향해 공격했을 때
   interact(h) {
