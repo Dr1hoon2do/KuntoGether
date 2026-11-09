@@ -1504,15 +1504,36 @@ class UIText extends Renderer {
     if (alpha <= 0) return;
     if (alpha < 1) ctx.globalAlpha = alpha;
 
-    ctx.fillStyle = this.color;
-    ctx.textAlign = this.align;
-    ctx.textBaseline = this.verticalAlign;
-    for (let i = 0; i < lines.length; i++) {
-      const ly = y + step * i;
-      ctx.fillText(lines[i], this.pixelSnap ? Math.round(x) : x, this.pixelSnap ? Math.round(ly) : ly);
-    }
+    // 글자는 내용이 바뀔 때만 작은 오프스크린 캔버스에 그려 두고 매 프레임 그 그림을 찍는다 (fillText, 특히 이모지·한글은 느리다)
+    const px = this.pixelSnap, key = this.text + '\u0000' + ctx.font + this.color + this.align + this.verticalAlign + '|' + Math.round(x) + ',' + Math.round(y) + ',' + step + ',' + lines.length + ',' + Math.round(r.width);
+    if (key !== this._cacheKey) this._bake(ctx, lines, x, y, step, size, px, key);
+    if (this._cache) ctx.drawImage(this._cache, this._cx, this._cy);
 
     if (alpha < 1) ctx.globalAlpha = 1;
+  }
+
+  // 글자 덩어리 크기를 재서 딱 맞는 캔버스에 그린다
+  _bake(ctx, lines, x, y, step, size, snap, key) {
+    this._cacheKey = key;
+    let wMax = 0;
+    for (const l of lines) wMax = Math.max(wMax, ctx.measureText(l).width);
+    const pad = Math.ceil(size * 0.4) + 2, block = step * (lines.length - 1);
+    const left = this.align === 'center' ? x - wMax / 2 : this.align === 'right' ? x - wMax : x;
+    const top = this.verticalAlign === 'top' ? y : this.verticalAlign === 'middle' ? y - size * 0.6 : y - size * 1.2;
+    const bx = Math.floor(left) - pad, by = Math.floor(top) - pad;
+    const W = Math.ceil(wMax) + pad * 2 + 2, H = Math.ceil(block + size * 1.5) + pad * 2;
+    if (W <= 0 || H <= 0 || W > 4096 || H > 4096) { this._cache = null; return; }
+    const cv = this._cache || (this._cache = document.createElement('canvas'));
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; } else { /* 크기가 같으면 지우기만 */ }
+    const c2 = cv.getContext('2d');
+    c2.setTransform(1, 0, 0, 1, 0, 0);
+    c2.clearRect(0, 0, W, H);
+    c2.font = ctx.font; c2.fillStyle = this.color; c2.textAlign = this.align; c2.textBaseline = this.verticalAlign;
+    for (let i = 0; i < lines.length; i++) {
+      const lx = snap ? Math.round(x) : x, ly = snap ? Math.round(y + step * i) : y + step * i;
+      c2.fillText(lines[i], lx - bx, ly - by);
+    }
+    this._cx = bx; this._cy = by;
   }
 
   // 단어 단위로 자르고, 한 단어가 너비보다 길면 글자 단위로 자른다. 같은 입력이면 캐시를 쓴다.
@@ -2010,6 +2031,9 @@ class Engine {
     this.ctx = this.canvas.getContext('2d', { alpha: options.alpha ?? false });
     this.clearColor = options.clearColor ?? '#000000';
     this.pixelRatio = options.pixelRatio ?? 1;
+    this._wantRatio = this.pixelRatio;           // 원하는 배율 (maxWidth/maxHeight 때문에 pixelRatio가 더 작아질 수 있다)
+    this.maxWidth = options.maxWidth ?? 0;       // 캔버스 가로 해상도 상한(device px, 0=제한 없음). TV처럼 큰 화면에서 채우기 비용을 줄인다
+    this.maxHeight = options.maxHeight ?? 0;
     this.imageSmoothing = options.imageSmoothing ?? false;
     this.pauseOnBlur = options.pauseOnBlur ?? true;
 
@@ -2155,8 +2179,13 @@ class Engine {
     const rect = this.canvas.getBoundingClientRect
       ? this.canvas.getBoundingClientRect()
       : { width: this.canvas.width, height: this.canvas.height };
-    const w = Math.max(1, Math.round((rect.width || this.canvas.width) * this.pixelRatio));
-    const h = Math.max(1, Math.round((rect.height || this.canvas.height) * this.pixelRatio));
+    const cw = rect.width || this.canvas.width, ch = rect.height || this.canvas.height;
+    let k = this._wantRatio;
+    if (this.maxWidth > 0) k = Math.min(k, this.maxWidth / cw);
+    if (this.maxHeight > 0) k = Math.min(k, this.maxHeight / ch);
+    this.pixelRatio = k;
+    const w = Math.max(1, Math.round(cw * k));
+    const h = Math.max(1, Math.round(ch * k));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
