@@ -76,7 +76,10 @@ class Hero extends Component {
     let mx = i.mx, my = i.my; const ml = Math.hypot(mx, my);
     if (ml > 1) { mx /= ml; my /= ml; }
     this.moving = ml > 0.2;
-    if (ml > 0.15) this.facing = Math.atan2(my, mx);
+    if (i.atk) { // 공격 조이스틱을 잡고 있는 동안은 이동 방향이 아니라 조준 방향(드래그 방향, 없으면 가장 가까운 적)으로 무기를 내민다
+      if (Math.hypot(i.ax, i.ay) > 0.35) this.facing = Math.atan2(i.ay, i.ax);
+      else { const a = this._autoAim(this.getWeapon()); if (a !== null) this.facing = a; else if (ml > 0.15) this.facing = Math.atan2(my, mx); }
+    } else if (ml > 0.15) this.facing = Math.atan2(my, mx);
 
     if (i.dash && !this.prevDash && this.dashCd <= 0 && this.dashT <= 0) { // 대시: 짧은 무적
       this.dashT = 0.16; this.dashCd = 0.7 * s.dashCd; this.invuln = Math.max(this.invuln, 0.2 + s.dashInvuln); this.dashAt = performance.now(); this.dashHit = new Set();
@@ -105,15 +108,16 @@ class Hero extends Component {
     if (this.swing) { this.swing.t -= dt; if (this.swing.t <= 0) { const sw = this.swing; this.swing = null; this._strike(sw.dir, sw.w, false); } }
     else if (i.atk && this.cd <= 0 && this.dashT <= 0) this._startSwing();
   }
+  _autoAim(w) { // 가장 가까운 적 방향 (없으면 null)
+    const p = this.transform.position; let best = null, bd = w.ranged ? Math.min(w.range, 150) : w.range + 22;
+    for (const e of this.game.enemies) { if (e.spawnDelay > 0 || e.dead) continue; const ep = e.transform.position, d = Math.hypot(ep.x - p.x, ep.y - p.y); if (d < bd) { bd = d; best = ep; } }
+    return best ? Math.atan2(best.y - p.y, best.x - p.x) : null;
+  }
   _startSwing() {
     const w = this.getWeapon(), g = this.game, p = this.transform.position;
     let dir = this.facing;
     if (Math.hypot(this.input.ax, this.input.ay) > 0.35) dir = Math.atan2(this.input.ay, this.input.ax); // 드래그로 직접 조준
-    else { // 자동 조준
-      let best = null, bd = w.ranged ? Math.min(w.range, 150) : w.range + 22;
-      for (const e of g.enemies) { if (e.spawnDelay > 0) continue; const ep = e.transform.position, d = Math.hypot(ep.x - p.x, ep.y - p.y); if (d < bd) { bd = d; best = ep; } }
-      if (best) dir = Math.atan2(best.y - p.y, best.x - p.x);
-    }
+    else { const a = this._autoAim(w); if (a !== null) dir = a; } // 자동 조준
     this.facing = dir;
     if (g.tryInteract(this)) { this.cd = 0.35; return; } // 아이템 앞에서 공격하면 획득·구매 (휘두르지는 않음)
     this.cd = w.cd; this.swing = { t: w.delay, dir, w };
