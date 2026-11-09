@@ -32,6 +32,7 @@
     'systems/Debug.js',
     'components/ParticleSystem.js',
     'components/SpriteAnimator.js',
+    'physics/Physics.js',
   ];
 
   const GAME_BASE = 'assets/';

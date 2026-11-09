@@ -74,6 +74,7 @@ class GameObject {
   addComponent(component) {
     component._gameObject = this;
     this._components.push(component);
+    component.onAttach(); // 붙은 직후 (awake보다 먼저, 엔진에 올라가기 전에도 호출됨)
 
     if (this._awoken && !this._destroyed) {
       component._awoken = true;

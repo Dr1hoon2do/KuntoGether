@@ -4,6 +4,7 @@
   Config.pixelPerfect = false;
   Config.viewWidth = 400; Config.viewHeight = 225; // 아레나가 한 화면에 꽉 차게
   Config.debug = new URLSearchParams(location.search).has("debug");
+  Debug.showColliders = Config.debug; // ?debug 에서는 충돌 모양(초록=지형 · 노랑=움직임 · 하늘=트리거)도 그린다
 
   // 렌더 해상도: 화면이 커도(4K, devicePixelRatio 2) 내부 캔버스는 최대 1280x720로 그리고 CSS로 늘린다 (TV 브라우저는 채우기 비용이 병목).
   // ?res=720|900|1080 처럼 세로 해상도를 고정할 수 있고, 안 쓰면 프레임이 느릴 때 자동으로 낮췄다가 여유가 생기면 다시 올린다.

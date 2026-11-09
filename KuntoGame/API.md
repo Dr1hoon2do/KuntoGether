@@ -279,3 +279,30 @@ Debug.opacity = 0.5;             // 표시 창 투명도 0~1 (배경·글자 모
 
 - 꺼져 있으면 비용이 거의 없다. 게임 값은 `if (Debug.enabled)` 안에서 넣으면 계산도 아낀다.
 - 오브젝트 수는 30프레임에 한 번만 센다.
+
+## Physics (2D 충돌) — `physics/Physics.js`
+모든 모양을 "둥근 상자"(중심·회전·반폭 hx,hy·모서리 반지름 rr) 하나로 다뤄서 원/상자/캡슐/둥근 상자의 이동·질의가 같은 수식으로 정확하다. 질의·이동은 객체를 만들지 않는다(결과는 넘겨준 배열/객체에 채움). 광역 탐색은 32px 격자.
+
+```js
+Physics.layer('Wall'); Physics.maskOf('Wall', 'Obstacle');          // 레이어 이름 → 비트 (31개까지)
+Physics.setCollision('Hero', 'Wall', false);                         // 레이어 매트릭스 (기본 전부 충돌)
+go.addComponent(Collider2D.circle(6, { layer: 'Hero', body: 'kinematic', data: owner }));
+Collider2D.box(w, h, opts) · .capsule(길이, r, opts) · .rbox(w, h, 모서리r, opts)   // 회전은 transform.rotation
+// opts: layer, mask(부딪힐 레이어), isTrigger, body('static'|'kinematic'|'dynamic'), offsetX/Y, data
+col.active = false;          // 질의·충돌에서 빠짐 (등장 연출·죽음 등)
+col.sync();                  // 위치를 직접 바꾼 직후 격자 갱신 — transform.setPosition 은 자동으로 해 준다
+
+Physics.moveCircle(x, y, r, dx, dy, mask, out, selfCollider)  // 막히면 미끄러지며 이동, 터널링 없음. out.x/y/hit/nx/ny/collider
+Physics.castCircle(x, y, r, dx, dy, mask, out, filter, ctx)   // 쏘아서 처음 맞는 것. out.t(0~1)/x/y/nx/ny/collider
+Physics.raycast(x, y, dx, dy, mask, out)
+Physics.overlapCircle(x, y, r, mask, arr) → 개수              // arr[0..n-1] = Collider2D (arr.length도 n)
+Physics.overlapBox(minX, minY, maxX, maxY, mask, arr)
+Physics.overlapSector(x, y, 반지름, 방향, 반각, mask, arr)    // 부채꼴(근접 휘두르기) — 모양과 정확히 교차
+Physics.overlapCapsule(ax, ay, bx, by, 반폭, mask, arr)       // 굵은 선(레이저·찌르기)
+Physics.pointQuery(x, y, r, mask, filter)                     // 가장 가까운 겹침 하나
+```
+- `Rigidbody2D`: 속도 `vx,vy`·`drag`·`bounce`. `type:'dynamic'`이면 고정 콜라이더에 스윕으로 막히고 반발한다.
+- 이벤트: 컴포넌트에 `onTriggerEnter/Stay/Exit(other)` · `onCollisionEnter/Stay/Exit(other)` 를 만들면 그 콜라이더만 프레임 끝에 판정한다(없으면 비용 0).
+- 질의 중 피해 처리로 같은 질의가 다시 불릴 수 있으면(연쇄 폭발 등) 결과 배열을 호출마다 새로 만들어 쓴다.
+- `Debug.showColliders = true` + `Debug.enabled`: 충돌 모양을 초록(고정)·노랑(움직임)·하늘(트리거)로 그린다. 게임은 `?debug`로 켠다.
+- 컴포넌트에 `onAttach()` 훅이 생겼다(붙은 직후, 엔진에 올라가기 전에도 호출).

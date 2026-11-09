@@ -11,6 +11,7 @@
 class Debug {
   static enabled = false;
   static showBounds = false;
+  static showColliders = false; // true면 Physics 콜라이더 외곽선도 그린다
   static corner = 'top-left';      // 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
   static offset = { x: 8, y: 8 };  // 구석에서 띄울 거리 (CSS px)
   static opacity = 1;              // 표시 창 전체 투명도 (0~1)
@@ -58,6 +59,7 @@ class Debug {
     if (!Debug.enabled) return;
     const r = engine.renderer;
     if (Debug.showBounds && r && Camera.main) Debug._drawBounds(ctx, r, Camera.main);
+    if (Debug.showColliders && typeof Physics !== 'undefined' && Camera.main) Physics.drawDebug(ctx, Camera.main);
 
     if (Debug._frame++ % 30 === 0) Debug._objects = Debug._countObjects(engine);
     Debug._frameMs += ((engine.frameMs ?? 0) - Debug._frameMs) * 0.1;

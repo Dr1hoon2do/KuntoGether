@@ -58,6 +58,7 @@ class Transform extends Component {
     this._localPosition.x = x;
     this._localPosition.y = y;
     this._markDirty();
+    const c = this._gameObject && this._gameObject._collider; if (c) c.sync(); // 물리 콜라이더가 있으면 격자도 바로 따라간다 (질의가 항상 최신 위치를 본다)
     return this;
   }
 
