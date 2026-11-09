@@ -48,11 +48,18 @@ const BALANCE = {
   maxArms: 6,                 // 회전 탄막 줄기 수 상한
   maxEnemyProjectiles: 340,   // 화면 위 적 탄 최대 개수 (넘으면 더 안 쏜다: 성능·공정성)
   coinRate: 1.0,              // 코인 드랍 확률 배율 (경제 조절: 가격은 Items.js ITEM_PRICE·weaponPrice)
-  bossRate: 1.18, bossCountAdd: 1, bossSpeed: 1.08,  // 보스 난이도: 패턴 빈도·탄 개수·속도
   eliteHp: 3, eliteCountAdd: 1, eliteRate: 1.25, eliteSpeed: 1.1, eliteRadius: 1.35,
 };
+// ── 난이도 ─────────────────────────────────────────────────────────────
+// 보통 = 기준(1층 슬라임 왕 수준). 쉬움은 적 체력·패턴 빈도·탄 속도/개수를 낮추고 모든 피해를 1로, 플레이어 시작 HP를 늘린다. 어려움은 반대.
+//  hp/rate/speed: 배율, countAdd: 탄 개수 가감, dmgCap: 적이 주는 피해 상한, bossRate/bossCount/bossSpeed/bossHp: 보스 추가 보정, playerHp: 플레이어 시작 HP
+const DIFFICULTY = {
+  easy:   { name: "쉬움",   playerHp: 8, hp: 0.75, rate: 0.78, speed: 0.9,  countAdd: -1, dmgCap: 1,  bossRate: 0.92, bossCount: 0, bossSpeed: 1.0,  bossHp: 0.8 },
+  normal: { name: "보통",   playerHp: 6, hp: 1,    rate: 1,    speed: 1,    countAdd: 0,  dmgCap: 99, bossRate: 1.18, bossCount: 1, bossSpeed: 1.08, bossHp: 1 },
+  hard:   { name: "어려움", playerHp: 5, hp: 1.3,  rate: 1.2,  speed: 1.1,  countAdd: 1,  dmgCap: 99, bossRate: 1.4,  bossCount: 2, bossSpeed: 1.15, bossHp: 1.25 },
+};
 // 층(floor)과 인원수(np)로 적 능력치 배율을 계산한다. 적은 생성될 때 이걸 한 번 받아 간다.
-function calcScale(floor, np, elite = false, boss = false) {
+function calcScale(floor, np, elite = false, boss = false, diff = "normal") {
   const B = BALANCE, f = floor - 1, e = Math.max(0, np - 1);
   const sc = {
     hp: (1 + B.hpPerFloor * f) * (1 - B.hpPerExtraPlayer + B.hpPerExtraPlayer * np),
@@ -62,7 +69,9 @@ function calcScale(floor, np, elite = false, boss = false) {
     dmgAdd: Math.floor(f / B.dmgEveryFloors),
   };
   if (elite) { sc.hp *= B.eliteHp; sc.countAdd += B.eliteCountAdd; sc.rate *= B.eliteRate; sc.speed *= B.eliteSpeed; }
-  if (boss) { sc.rate *= B.bossRate; sc.countAdd += B.bossCountAdd; sc.speed *= B.bossSpeed; }
+  const D = DIFFICULTY[diff] || DIFFICULTY.normal;
+  sc.hp *= D.hp; sc.rate *= D.rate; sc.speed *= D.speed; sc.countAdd = Math.max(0, sc.countAdd + D.countAdd); sc.dmgCap = D.dmgCap;
+  if (boss) { sc.rate *= D.bossRate; sc.countAdd += D.bossCount; sc.speed *= D.bossSpeed; sc.hp *= D.bossHp; }
   return sc;
 }
 
@@ -259,10 +268,10 @@ class Enemy extends Component {
     const def = ENEMY_DEFS[type];
     this.game = game; this.def = def; this.type = type; this.title = def.name; this.boss = !!def.boss;
     this.elite = !!opts.elite; this.parent = opts.parent || null; this.guardOf = opts.guardOf || null; this.orbitOpt = opts.orbit || null;
-    this.sc = calcScale(game.floorNum, Math.max(1, game.heroes.length), this.elite, this.boss);
+    this.sc = calcScale(game.floorNum, Math.max(1, game.heroes.length), this.elite, this.boss, game.difficulty);
     this.radius = def.radius * (this.elite ? BALANCE.eliteRadius : 1);
     this.hp = this.maxHp = Math.max(1, Math.round(def.hp * this.sc.hp));
-    this.speed = def.speed * this.sc.speed; this.touch = (def.touch || 0) ? def.touch + this.sc.dmgAdd : 0;
+    this.speed = def.speed * this.sc.speed; this.touch = (def.touch || 0) ? this._dm(def.touch) : 0;
     this.color = def.color; this.resist = def.resist || 0;
     this.spawnDelay = opts.delay ?? 0.7; this.kx = 0; this.ky = 0; this.t = Math.random() * 6;
     this.dead = false; this.busy = null; this.fuse = 0; this.face = 0; this.lift = 0;
@@ -289,6 +298,7 @@ class Enemy extends Component {
   setup() {
     this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), this.radius + 80, { order: 4 }));
   }
+  _dm(n) { return Math.max(1, Math.min(n + this.sc.dmgAdd, this.sc.dmgCap)); } // 층 보정 + 난이도 상한이 반영된 적의 피해
   _count(d, key = "count") { return Math.round(d[key] + (d.countScale ? this.sc.countAdd : 0)); }
   // 아이템 효과(화상·둔화·기절). 보스는 기절 면역.
   applyStatus(stats, by) {
@@ -494,7 +504,7 @@ class Enemy extends Component {
   // ---- 공격 패턴 ----
   _begin(at, aim, target) {
     const d = at.d, g = this.game, p = this.transform.position, sc = this.sc;
-    const dmg = (d.dmg || 1) + sc.dmgAdd, spd = (d.speed || 80) * sc.speed, bo = this._bopts(d);
+    const dmg = this._dm(d.dmg || 1), spd = (d.speed || 80) * sc.speed, bo = this._bopts(d);
     switch (d.type) {
       case "shoot": this._fire(d, aim, dmg, spd, this._count(d)); at.cd = d.cd; break;
       case "burst": this.busy = { type: "burst", d, at, phase: "run", left: d.rounds, acc: 0, dmg, spd }; break;
@@ -526,7 +536,7 @@ class Enemy extends Component {
       }
       case "bombard": {
         const n = this._count(d), alive = g.heroes.filter(h => h.alive); if (!alive.length) break;
-        for (let i = 0; i < n; i++) { const h = alive[i % alive.length].transform.position, [x, y] = this._clampPos(h.x + (Math.random() - 0.5) * (i < alive.length ? 10 : 70), h.y + (Math.random() - 0.5) * (i < alive.length ? 10 : 70), 12); g.spawnHazard(x, y, d.radius || 24, d.delay || 0.9, (d.dmg || 2) + sc.dmgAdd); }
+        for (let i = 0; i < n; i++) { const h = alive[i % alive.length].transform.position, [x, y] = this._clampPos(h.x + (Math.random() - 0.5) * (i < alive.length ? 10 : 70), h.y + (Math.random() - 0.5) * (i < alive.length ? 10 : 70), 12); g.spawnHazard(x, y, d.radius || 24, d.delay || 0.9, this._dm(d.dmg || 2)); }
         SFX.play("warn"); at.cd = d.cd; break;
       }
       case "summon": {
@@ -611,7 +621,7 @@ class Enemy extends Component {
       this.transform.setPosition(b.sx + (b.tx - b.sx) * e, b.sy + (b.ty - b.sy) * e);
       if (b.t <= 0) {
         this.lift = 0; const q = this.transform.position;
-        for (const h of g.heroes) { const hp = h.transform.position; if (h.alive && Math.hypot(hp.x - q.x, hp.y - q.y) < d.radius + h.radius) h.hit((d.dmg || 1) + sc.dmgAdd, q.x, q.y, 200); }
+        for (const h of g.heroes) { const hp = h.transform.position; if (h.alive && Math.hypot(hp.x - q.x, hp.y - q.y) < d.radius + h.radius) h.hit(this._dm(d.dmg || 1), q.x, q.y, 200); }
         g.fx.emit(q.x, q.y, { count: 26, colors: [this.color, "#fff"], speed: [50, 140], life: [0.2, 0.45], size: [1, 2.4], fade: true, area: d.radius * 0.4 }); g.cam.shake(3, 0.2); SFX.play("boom");
         b.at.cd = d.cd; this.busy = null;
       }
@@ -619,7 +629,7 @@ class Enemy extends Component {
     }
     if (b.type === "slam") {
       if (b.t <= 0) {
-        for (const h of g.heroes) { const hp = h.transform.position; if (h.alive && Math.hypot(hp.x - p.x, hp.y - p.y) < d.radius + h.radius) h.hit((d.dmg || 2) + sc.dmgAdd, p.x, p.y, 200); }
+        for (const h of g.heroes) { const hp = h.transform.position; if (h.alive && Math.hypot(hp.x - p.x, hp.y - p.y) < d.radius + h.radius) h.hit(this._dm(d.dmg || 2), p.x, p.y, 200); }
         g.fx.emit(p.x, p.y, { count: 30, colors: [this.color, "#fff"], speed: [60, 160], life: [0.2, 0.5], size: [1, 2.5], fade: true, area: d.radius * 0.4 });
         g.cam.shake(4, 0.25); SFX.play("boom"); b.at.cd = d.cd; this.busy = null;
       }
@@ -630,7 +640,7 @@ class Enemy extends Component {
       b.ang += (d.rot || 1) * dt;
       for (const h of g.heroes) {
         if (!h.alive) continue; const hp = h.transform.position, dx = hp.x - p.x, dy = hp.y - p.y;
-        for (let k = 0; k < b.n; k++) { const a = b.ang + k * Math.PI * 2 / b.n, along = dx * Math.cos(a) + dy * Math.sin(a), perp = Math.abs(-dx * Math.sin(a) + dy * Math.cos(a)); if (along > 0 && perp < d.width / 2 + h.radius) { h.hit(1 + sc.dmgAdd, p.x, p.y, 100); break; } }
+        for (let k = 0; k < b.n; k++) { const a = b.ang + k * Math.PI * 2 / b.n, along = dx * Math.cos(a) + dy * Math.sin(a), perp = Math.abs(-dx * Math.sin(a) + dy * Math.cos(a)); if (along > 0 && perp < d.width / 2 + h.radius) { h.hit(this._dm(1), p.x, p.y, 100); break; } }
       }
       if (b.t <= 0) { b.at.cd = d.cd; this.busy = null; }
       return [0, 0];
@@ -641,7 +651,7 @@ class Enemy extends Component {
         if (b.t <= 0) {
           const tp = target.transform.position, a = Math.random() * 6.28, nr = d.near || 55, [x, y] = this._clampPos(tp.x + Math.cos(a) * nr, tp.y + Math.sin(a) * nr, this.radius + 4);
           this.transform.setPosition(x, y); b.phase = "appear"; b.t = 0.35;
-          if (d.slam) g.spawnHazard(x, y, 30, 0.7, 2 + sc.dmgAdd, "#ff4081");
+          if (d.slam) g.spawnHazard(x, y, 30, 0.7, this._dm(2), "#ff4081");
         }
       } else { this.alpha = Math.min(1, 1 - b.t / 0.35); if (b.t <= 0) { this.alpha = 1; this.ethereal = false; b.at.cd = d.cd; this.busy = null; } }
       return [0, 0];
@@ -650,7 +660,7 @@ class Enemy extends Component {
   }
   _explode() {
     const g = this.game, p = this.transform.position, R = 30;
-    for (const h of g.heroes) { const hp = h.transform.position; if (h.alive && Math.hypot(hp.x - p.x, hp.y - p.y) < R + h.radius) h.hit(2 + this.sc.dmgAdd, p.x, p.y, 220); }
+    for (const h of g.heroes) { const hp = h.transform.position; if (h.alive && Math.hypot(hp.x - p.x, hp.y - p.y) < R + h.radius) h.hit(this._dm(2), p.x, p.y, 220); }
     g.fx.emit(p.x, p.y, { count: 40, colors: ["#ff7043", "#ffee58", "#fff"], speed: [50, 150], life: [0.2, 0.5], size: [1.5, 3], fade: true, area: 10 });
     g.cam.shake(4, 0.25); SFX.play("boom"); this.die(null, true);
   }

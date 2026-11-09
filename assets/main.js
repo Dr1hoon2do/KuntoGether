@@ -9,6 +9,7 @@
   const go = App.create("game");
   const game = go.addComponent(new Game(App));
   window.game = game; // 디버깅용
+  const qd = new URLSearchParams(location.search).get("diff"); if (qd) game.setDifficulty(qd, null, true); // tv.html?diff=easy|normal|hard
   App.start();
   game.startNet();
 })();

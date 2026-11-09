@@ -9,6 +9,7 @@ class Game extends Component {
     this.nextId = 0; this.overTimer = 0; this.introTimer = 0; this.introText = "";
     this.doorHold = 0; this.stairsHold = 0; this.stairsGO = null; this.toastText = ""; this.toastT = 0;
     this.usedBosses = new Set(); this.gold = 0; this.obstacles = []; this.bombs = []; // gold: 팀 공유 골드
+    this.difficulty = "normal"; this.runStarted = false; // 난이도는 첫 문으로 나가기 전(런 시작 전)에만 바꿀 수 있다
   }
   awake() {
     const App = this.App;
@@ -68,6 +69,19 @@ class Game extends Component {
     const go = this.App.create("pickup_" + d.type); go.transform.setPosition(d.x, d.y);
     const pk = go.addComponent(new Pickup(this, d)); pk.setup(); this.pickups.push(pk); return pk;
   }
+  // ---------- 난이도 ----------
+  diffProfile() { return DIFFICULTY[this.difficulty] || DIFFICULTY.normal; }
+  // 런이 시작되기 전(첫 문으로 나가기 전)에만 바뀐다. 플레이어 시작 HP도 난이도에 따라 달라진다.
+  setDifficulty(d, by, silent) {
+    if (!DIFFICULTY[d] || (this.runStarted && !silent)) return false;
+    this.difficulty = d; const hp = this.diffProfile().playerHp;
+    if (!this.runStarted) for (const h of this.roster.values()) { h.maxHp = h.hp = hp; }
+    if (!silent) this.toast(`난이도: ${DIFFICULTY[d].name}${by ? ` (${by.nick} 선택)` : ""}`, 2.5);
+    return true;
+  }
+  // 방장 = 먼저 접속한 (아직 연결돼 있는) 폰 플레이어
+  _owner() { for (const h of this.roster.values()) if (h.conn && this.heroes.includes(h)) return h; return null; }
+
   // ---------- 파티(골드 관련 아이템은 모두에게 적용) ----------
   partySum(k) { let a = 0; for (const h of this.heroes) a += h.stats[k] || 0; return a; }
   partyAny(k) { return this.heroes.some(h => h.stats[k]); }
@@ -141,7 +155,7 @@ class Game extends Component {
   // ---------- 런·층·방 ----------
   startRun() {
     for (const h of this.roster.values()) { h.resetRun(); h.alive = true; h.invuln = 0; }
-    this.usedBosses = new Set(); this.gold = 0; this.floorNum = 1; this.startFloor();
+    this.usedBosses = new Set(); this.gold = 0; this.floorNum = 1; this.runStarted = false; this.startFloor();
   }
   startFloor() {
     this._clearObjects(); this.cur = null; this.map = generateFloor(this.floorNum);
@@ -161,6 +175,7 @@ class Game extends Component {
   }
   enterRoom(room, dir) {
     if (this.cur) { this._leaveRoom(); this._fadeIn(); SFX.play("door"); }
+    if (dir) this.runStarted = true; // 문으로 나가면 난이도 확정
     this.cur = room; room.visited = true; this.doorHold = 0; this.stairsHold = 0; this.state = "explore";
     applyGeo(room); // 방 모양(1~4칸)과 크기. 카메라 배율은 그대로
     const hw0 = ARENA.w / 2, hh0 = ARENA.h / 2; this.camFollow.bounds = { minX: -hw0, maxX: hw0, minY: -hh0, maxY: hh0 };
@@ -317,11 +332,13 @@ class Game extends Component {
     } else h = this.addHero(pid);
     if (nick) h.nick = nick; else if (!rejoined) h.nick = `P${h.id + 1}`;
     h.conn = c; h.lastMsg = performance.now(); c._hero = h; this.conns.set(c, h);
-    c.send({ t: "welcome", id: h.id, color: h.color, name: h.nick, rejoined });
+    if (d.diff && DIFFICULTY[d.diff] && this._owner() === h && this.difficulty !== d.diff) this.setDifficulty(d.diff, h); // 방장만 난이도를 고를 수 있다
+    c.send({ t: "welcome", id: h.id, color: h.color, name: h.nick, rejoined, owner: this._owner() === h });
     if (rejoined) this.toast(`${h.nick} 다시 접속`, 2);
   }
   _keyboard() {
     if (Input.getKeyDown("KeyK") && !this.roster.has("kb")) this.addHero("kb", "키보드");
+    if (!this.runStarted) for (const [code, d] of [["Digit1", "easy"], ["Digit2", "normal"], ["Digit3", "hard"], ["Numpad1", "easy"], ["Numpad2", "normal"], ["Numpad3", "hard"]]) if (Input.getKeyDown(code) && this.difficulty !== d) this.setDifficulty(d, null);
     const h = this.heroes.find(x => x.keyboard); if (!h) return;
     const k = c => (Input.getKey(c) ? 1 : 0);
     Object.assign(h.input, { mx: k("KeyD") - k("KeyA"), my: k("KeyW") - k("KeyS"), atk: k("KeyJ") || k("Space"), dash: k("KeyL") || k("ShiftLeft"), act: k("KeyE") || k("KeyI") });
@@ -392,12 +409,13 @@ class Game extends Component {
   _flashVignette() { Tween.killTweensOf(this.vignette); this.vignette.alpha = 0.3; Tween.to(this.vignette, { alpha: 0 }, 0.25); }  // 맞으면 화면이 잠깐 붉어짐
   _updateHud() {
     const room = this.cur;
-    this.hudTop.setText(room ? `${this.floorNum}층 · ${ROOM_NAMES[room.type]}${room.big ? " (큰 방)" : ""}${this.state === "fight" ? `   남은 적 ${this.enemies.length}` : ""}\n💰 ${this.gold}G (팀 공유)${SFX.unlocked ? (SFX.muted ? "   🔇 M" : "") : "   🔇 아무 키나 누르면 소리"}` : "");
+    this.hudTop.setText(room ? `${this.floorNum}층 [${this.diffProfile().name}] · ${ROOM_NAMES[room.type]}${room.big ? " (큰 방)" : ""}${this.state === "fight" ? `   남은 적 ${this.enemies.length}` : ""}\n💰 ${this.gold}G (팀 공유)${SFX.unlocked ? (SFX.muted ? "   🔇 M" : "") : "   🔇 아무 키나 누르면 소리"}` : "");
     this.hudRoom.setText(this.roomCode ? `방 코드 ${this.roomCode}` : "");
     const boss = this.enemies.find(e => e.boss && !e.dead);
     this.hudBoss.setText(boss ? `☠ ${boss.title}  ${"█".repeat(Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${"░".repeat(20 - Math.ceil(20 * Math.max(0, boss.hp) / boss.maxHp))}${boss.invuln ? `  🛡 ${SHIELD_NAMES[boss.shieldKind] || "보호막"}` : ""}` : "");
     this.hudHeroes.setText(this.heroes.map(h => `${h.nick} ${h.alive ? "♥".repeat(h.hp) + "♡".repeat(h.maxHp - h.hp) : "💀"} ${weaponLabel(h.weapon)} ★${h.items.length}${h.active ? " " + activeLabel(h.active) : ""}`).join("    "));
-    this.hudToast.setText(this.toastT > 0 ? this.toastText : "");
+    const diffHint = !this.runStarted && this.heroes.length && room && room.type === "start" ? `난이도 [${this.diffProfile().name}]  ·  키보드 1 쉬움 / 2 보통 / 3 어려움, 또는 방장 폰에서 선택 (문으로 나가면 확정)` : "";
+    this.hudToast.setText(this.toastT > 0 ? this.toastText : diffHint);
     let c = "";
     if (!this.heroes.length) c = this.roomCode ? `폰으로 접속하세요\n방 코드: ${this.roomCode}\n(키보드: K — WASD 이동, J 공격, L 대시)` : "서버 연결 중...";
     else if (this.state === "over") c = `GAME OVER\n${this.floorNum}층 도달\n${Math.ceil(this.overTimer)}초 후 처음부터`;
@@ -435,6 +453,6 @@ class Game extends Component {
   _sendStatus(dt) {
     this._statusCd = (this._statusCd || 0) - dt;
     if (this._statusCd > 0) return; this._statusCd = 0.2;
-    for (const [c, h] of this.conns) if (c.open) c.send({ t: "st", hp: h.hp, maxHp: h.maxHp, alive: h.alive, weapon: weaponLabel(h.weapon), floor: this.floorNum, gold: this.gold, items: h.items.length, itemNames: h.items.map(id => PASSIVES[id].icon + PASSIVES[id].name), act: h.active ? { name: ACTIVES[h.active.id].icon + ACTIVES[h.active.id].name, text: activeLabel(h.active), ready: ACTIVES[h.active.id].kind === "charge" ? h.active.charge > 0 : h.active.cdLeft <= 0 } : null, kills: h.kills, name: h.nick });
+    for (const [c, h] of this.conns) if (c.open) c.send({ t: "st", hp: h.hp, maxHp: h.maxHp, alive: h.alive, weapon: weaponLabel(h.weapon), floor: this.floorNum, diff: this.diffProfile().name, gold: this.gold, items: h.items.length, itemNames: h.items.map(id => PASSIVES[id].icon + PASSIVES[id].name), act: h.active ? { name: ACTIVES[h.active.id].icon + ACTIVES[h.active.id].name, text: activeLabel(h.active), ready: ACTIVES[h.active.id].kind === "charge" ? h.active.charge > 0 : h.active.cdLeft <= 0 } : null, kills: h.kills, name: h.nick });
   }
 }

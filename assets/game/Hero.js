@@ -15,7 +15,7 @@ class Hero extends Component {
     this.kx = 0; this.ky = 0; this.radius = 6; this.keyboard = false;
   }
   resetRun() { // 새 게임을 시작할 때 초기화 (닉네임·pid는 유지)
-    this.maxHp = 6; this.hp = 6; this.kills = 0; this.items = []; this.stats = newStats(); this.active = null; this.moveT = 0; this.moveMul = 1;
+    const php = this.game.diffProfile().playerHp; this.maxHp = php; this.hp = php; this.kills = 0; this.items = []; this.stats = newStats(); this.active = null; this.moveT = 0; this.moveMul = 1;
     this.weapon = { id: "sword", tier: 0 }; this.leechN = 0; this.regenT = 0; this.echoes = [];
     this.roomT = 99; this.hitThisRoom = false; this.heartBuffOn = false; this.dashAt = -1e9; this.moving = false; this.dashHit = new Set();
   }
