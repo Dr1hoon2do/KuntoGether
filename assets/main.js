@@ -4,6 +4,7 @@
   Config.pixelPerfect = false;
   Config.viewWidth = 400; Config.viewHeight = 225; // 아레나가 한 화면에 꽉 차게
   Config.debug = new URLSearchParams(location.search).has("debug");
+  Debug.showColliders = Config.debug; // ?debug 에서는 충돌 모양(초록=지형 · 노랑=움직임 · 하늘=트리거)도 그린다
 
   const App = new Engine({ canvas: "#game", clearColor: "#05070a", pixelRatio: Math.min(2, window.devicePixelRatio || 1) });
   const go = App.create("game");

@@ -619,6 +619,7 @@ class Component {
   destroy() { this.gameObject.removeComponent(this); }
 
   // override
+  onAttach() {}
   awake() {}
   onEnable() {}
   start() {}
@@ -689,6 +690,7 @@ class Transform extends Component {
     this._localPosition.x = x;
     this._localPosition.y = y;
     this._markDirty();
+    const c = this._gameObject && this._gameObject._collider; if (c) c.sync(); // 물리 콜라이더가 있으면 격자도 바로 따라간다 (질의가 항상 최신 위치를 본다)
     return this;
   }
 
@@ -940,6 +942,7 @@ class GameObject {
   addComponent(component) {
     component._gameObject = this;
     this._components.push(component);
+    component.onAttach(); // 붙은 직후 (awake보다 먼저, 엔진에 올라가기 전에도 호출됨)
 
     if (this._awoken && !this._destroyed) {
       component._awoken = true;
@@ -4297,7 +4300,7 @@ class Collider2D extends Component {
     super();
     this.shape = shape;                      // 'circle' | 'box' | 'capsule'
     this.radius = 0; this.w = 0; this.h = 0; // circle: radius / box: w,h / capsule: w(길이), radius
-    if (shape === 'circle') this.radius = a; else if (shape === 'box') { this.w = a; this.h = b; } else { this.w = a; this.radius = b; }
+    if (shape === 'circle') this.radius = a; else if (shape === 'box' || shape === 'rbox') { this.w = a; this.h = b; } else { this.w = a; this.radius = b; }
     this.layerName = opts.layer || 'Default'; this.bit = Physics.layer(this.layerName);
     this.mask = opts.mask ?? -1;
     this.isTrigger = !!opts.isTrigger;
@@ -4322,8 +4325,9 @@ class Collider2D extends Component {
   setRadius(r) { this.radius = r; this.sync(true); return this; }
   setSize(w, h) { this.w = w; if (h !== undefined) this.h = h; this.sync(true); return this; }
 
-  onEnable() { Physics._add(this); this.sync(true); }
-  onDisable() { Physics._remove(this); }
+  onAttach() { Physics._add(this); if (!this._gameObject._collider) this._gameObject._collider = this; this.sync(true); } // 붙자마자 질의에 잡힌다 (다음 프레임을 기다리지 않음)
+  onEnable() { Physics._add(this); if (this._gameObject && !this._gameObject._collider) this._gameObject._collider = this; this.sync(true); }
+  onDisable() { Physics._remove(this); if (this._gameObject && this._gameObject._collider === this) this._gameObject._collider = null; }
 
   // transform에서 월드 모양을 다시 계산하고 격자를 갱신한다. 움직인 직후에 호출하면 질의가 바로 새 위치를 본다.
   sync(force) {
@@ -4747,7 +4751,7 @@ Physics.drawDebug = function (ctx, camera) {
     ctx.save(); ctx.translate(c.cx, c.cy); ctx.rotate(Math.atan2(c.sin, c.cos)); ctx.beginPath();
     if (c.hx === 0 && c.hy === 0) ctx.arc(0, 0, c.rr, 0, 7);
     else if (c.rr === 0) ctx.rect(-c.hx, -c.hy, c.hx * 2, c.hy * 2);
-    else { ctx.arc(-c.hx, 0, c.rr, Math.PI / 2, -Math.PI / 2); ctx.arc(c.hx, 0, c.rr, -Math.PI / 2, Math.PI / 2); ctx.closePath(); }
+    else { const h = Math.PI / 2; ctx.arc(c.hx, c.hy, c.rr, 0, h); ctx.arc(-c.hx, c.hy, c.rr, h, 2 * h); ctx.arc(-c.hx, -c.hy, c.rr, 2 * h, 3 * h); ctx.arc(c.hx, -c.hy, c.rr, 3 * h, 4 * h); ctx.closePath(); } // 캡슐·둥근 상자
     ctx.stroke(); ctx.restore();
   }
 };

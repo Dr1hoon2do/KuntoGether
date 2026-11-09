@@ -30,6 +30,7 @@ class Component {
   destroy() { this.gameObject.removeComponent(this); }
 
   // override
+  onAttach() {}
   awake() {}
   onEnable() {}
   start() {}

@@ -327,7 +327,7 @@ class Enemy extends Component {
     this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), this.radius + 80, { order: 4 }));
     // 충돌 모양: 그려지는 도형에 맞춘 원 (도형 종류별로 눈에 보이는 크기와 같게). 등장 연출 중·죽은 뒤에는 꺼 둔다.
     this.hitR = this.radius * (HIT_K[this.def.kind] ?? 1);
-    this.col = this.gameObject.addComponent(Collider2D.circle(this.hitR, { layer: "Enemy", body: "kinematic", data: this })); this.col.active = false;
+    this.col = this.gameObject.addComponent(Collider2D.circle(this.hitR, { layer: "Enemy", body: "kinematic", data: this })); this.col.active = this.spawnDelay <= 0 && !this.dead;
     this._mv = { x: 0, y: 0, hit: false, nx: 0, ny: 0, collider: null }; this._nb = [];
   }
   lateUpdate() { if (this.col) this.col.sync(); }
