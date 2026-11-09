@@ -35,6 +35,7 @@ class Engine {
 
     // 트윈은 GameObject update 전에 값을 움직이고, 디버그 표시는 화면을 다 그린 뒤 맨 위에 그린다 (Config.debug로 켜고 끔)
     this.addSystem(Tween);
+    if (typeof Physics !== 'undefined') this.addSystem(Physics); // 프레임 시작에 콜라이더 위치 동기화, 프레임 끝에 트리거 이벤트
     this.addSystem(Debug);
     this.frameMs = 0; // 지난 프레임의 엔진 작업 시간 (ms, 디버그 표시용)
 
