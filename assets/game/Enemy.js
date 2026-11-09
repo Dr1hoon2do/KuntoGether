@@ -52,11 +52,12 @@ const BALANCE = {
 };
 // ── 난이도 ─────────────────────────────────────────────────────────────
 // 보통 = 기준(1층 슬라임 왕 수준). 쉬움은 적 체력·패턴 빈도·탄 속도/개수를 낮추고 모든 피해를 1로, 플레이어 시작 HP를 늘린다. 어려움은 반대.
-//  hp/rate/speed: 배율, countAdd: 탄 개수 가감, dmgCap: 적이 주는 피해 상한, bossRate/bossCount/bossSpeed/bossHp: 보스 추가 보정, playerHp: 플레이어 시작 HP
+//  hp/rate/speed: 배율, countMul: 탄 개수 배율, countAdd: 탄 개수 가감, dmgCap: 적이 주는 피해 상한, bossRate/bossCount/bossSpeed/bossHp: 보스 추가 보정, playerHp: 플레이어 시작 HP
+//  목표(1층 보스 위협도, tools로 측정): 쉬움 ≈ 2~3 (보통의 1/4) · 보통 ≈ 10 (슬라임 왕 기준) · 어려움 ≈ 15~17
 const DIFFICULTY = {
-  easy:   { name: "쉬움",   playerHp: 8, hp: 0.75, rate: 0.78, speed: 0.9,  countAdd: -1, dmgCap: 1,  bossRate: 0.92, bossCount: 0, bossSpeed: 1.0,  bossHp: 0.8 },
-  normal: { name: "보통",   playerHp: 6, hp: 1,    rate: 1,    speed: 1,    countAdd: 0,  dmgCap: 99, bossRate: 1.18, bossCount: 1, bossSpeed: 1.08, bossHp: 1 },
-  hard:   { name: "어려움", playerHp: 5, hp: 1.3,  rate: 1.2,  speed: 1.1,  countAdd: 1,  dmgCap: 99, bossRate: 1.4,  bossCount: 2, bossSpeed: 1.15, bossHp: 1.25 },
+  easy:   { name: "쉬움",   playerHp: 8, hp: 0.7,  rate: 0.65, speed: 0.85, countMul: 0.55, countAdd: -1, dmgCap: 1,  bossRate: 0.8,  bossCount: 0, bossSpeed: 1.0,  bossHp: 0.7 },
+  normal: { name: "보통",   playerHp: 6, hp: 1,    rate: 1,    speed: 1,    countMul: 1,    countAdd: 0,  dmgCap: 99, bossRate: 1.18, bossCount: 1, bossSpeed: 1.08, bossHp: 1 },
+  hard:   { name: "어려움", playerHp: 5, hp: 1.3,  rate: 1.2,  speed: 1.1,  countMul: 1.2,  countAdd: 1,  dmgCap: 99, bossRate: 1.4,  bossCount: 2, bossSpeed: 1.15, bossHp: 1.25 },
 };
 // 층(floor)과 인원수(np)로 적 능력치 배율을 계산한다. 적은 생성될 때 이걸 한 번 받아 간다.
 function calcScale(floor, np, elite = false, boss = false, diff = "normal") {
@@ -70,7 +71,7 @@ function calcScale(floor, np, elite = false, boss = false, diff = "normal") {
   };
   if (elite) { sc.hp *= B.eliteHp; sc.countAdd += B.eliteCountAdd; sc.rate *= B.eliteRate; sc.speed *= B.eliteSpeed; }
   const D = DIFFICULTY[diff] || DIFFICULTY.normal;
-  sc.hp *= D.hp; sc.rate *= D.rate; sc.speed *= D.speed; sc.countAdd = Math.max(0, sc.countAdd + D.countAdd); sc.dmgCap = D.dmgCap;
+  sc.hp *= D.hp; sc.rate *= D.rate; sc.speed *= D.speed; sc.countAdd = Math.max(0, sc.countAdd + D.countAdd); sc.countMul = D.countMul; sc.dmgCap = D.dmgCap;
   if (boss) { sc.rate *= D.bossRate; sc.countAdd += D.bossCount; sc.speed *= D.bossSpeed; sc.hp *= D.bossHp; }
   return sc;
 }
@@ -325,7 +326,7 @@ class Enemy extends Component {
     this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), this.radius + 80, { order: 4 }));
   }
   _dm(n) { return Math.max(1, Math.min(n + this.sc.dmgAdd, this.sc.dmgCap)); } // 층 보정 + 난이도 상한이 반영된 적의 피해
-  _count(d, key = "count") { return Math.round(d[key] + (d.countScale ? this.sc.countAdd : 0)); }
+  _count(d, key = "count") { return Math.max(1, Math.round((d[key] + (d.countScale ? this.sc.countAdd : 0)) * this.sc.countMul)); } // 층·인원 보너스 + 난이도 배율
   // 아이템 효과(화상·둔화·기절). 보스는 기절 면역.
   applyStatus(stats, by) {
     if (stats.burn > 0) this.burn = { t: 3, dps: 2 * stats.burn, by, tick: 0.5 };
@@ -606,7 +607,7 @@ class Enemy extends Component {
       return [0, 0];
     }
     if (b.type === "spiral") {
-      const arms = Math.min(BALANCE.maxArms, Math.round(d.arms + (d.countScale ? sc.countAdd : 0))), interval = 1 / (d.rate * sc.rate), bo = this._bopts(d);
+      const arms = Math.min(BALANCE.maxArms, Math.max(1, Math.round((d.arms + (d.countScale ? sc.countAdd : 0)) * sc.countMul))), interval = 1 / (d.rate * sc.rate), bo = this._bopts(d);
       b.acc += dt;
       while (b.acc >= interval) { b.acc -= interval; b.base += d.step; for (let i = 0; i < arms; i++) g.spawnProj(p.x, p.y, b.base + i * Math.PI * 2 / arms, b.spd, b.dmg, false, bo); }
       if (b.t <= 0) { b.at.cd = d.cd; this.busy = null; }
