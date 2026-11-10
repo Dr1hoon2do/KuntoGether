@@ -389,27 +389,27 @@ class Familiar extends Component {
 //   use(hero, game) → true면 사용됨 (false면 소모 안 함)
 // ============================================================================
 const ACTIVES = {
-  vial:      { tier: 1, icon: "🧪", name: "붉은 약병",   kind: "charge", max: 6, desc: "HP 2 회복",
+  vial:      { tier: 1, icon: "🧪", name: "붉은 약병",   kind: "charge", max: 3, desc: "HP 2 회복",
                use(h, g) { if (h.hp >= h.maxHp) return false; h.heal(2); g.puff(h, ["#ef5350", "#fff"]); SFX.play("swap"); return true; } },
   feather:   { tier: 1, icon: "🪽", name: "도약의 깃털", kind: "cooldown", cd: 8, desc: "바라보는 방향으로 도약 (0.5초 무적)",
                use(h, g) { const p = h.transform.position; g.puff(h, ["#fff", "#b3e5fc"]); const [x, y] = g.pushOut(p.x + Math.cos(h.facing) * 62, p.y + Math.sin(h.facing) * 62, h.radius); h.transform.setPosition(Math.max(-ARENA.w / 2 + 7, Math.min(ARENA.w / 2 - 7, x)), Math.max(-ARENA.h / 2 + 7, Math.min(ARENA.h / 2 - 7, y))); h.invuln = Math.max(h.invuln, 0.5); g.puff(h, ["#fff", "#b3e5fc"]); SFX.play("door"); return true; } },
-  bomb:      { tier: 1, icon: "💣", name: "폭탄 가방",   kind: "charge", max: 2, desc: "1초 뒤 터지는 폭탄 설치 (바위·상자 파괴)",
+  bomb:      { tier: 1, icon: "💣", name: "폭탄 가방",   kind: "charge", max: 1, desc: "1초 뒤 터지는 폭탄 설치 (바위·상자 파괴)",
                use(h, g) { const p = h.transform.position; g.spawnBomb(p.x, p.y, h); return true; } },
-  coinflip:  { tier: 1, icon: "🪙", name: "동전 던지기", kind: "charge", max: 2, desc: "앞이면 팀 골드 +8G, 뒤면 아무 일도 없음",
+  coinflip:  { tier: 1, icon: "🪙", name: "동전 던지기", kind: "charge", max: 1, desc: "앞이면 팀 골드 +8G, 뒤면 아무 일도 없음",
                use(h, g) { if (Math.random() < 0.5) { g.addGold(8); g.puff(h, ["#ffca28", "#fff"]); SFX.play("coin"); } else g.puff(h, ["#9e9e9e"]); return true; } },
-  shieldgen: { tier: 1, icon: "🔰", name: "휴대용 방패", kind: "charge", max: 3, desc: "보호막 1 (한 번 맞아도 무효, 최대 2)",
+  shieldgen: { tier: 1, icon: "🔰", name: "휴대용 방패", kind: "charge", max: 2, desc: "보호막 1 (한 번 맞아도 무효, 최대 2)",
                use(h, g) { if (h.shield >= 2) return false; h.shield++; g.puff(h, ["#80deea", "#fff"]); SFX.play("swap"); return true; } },
   gather:    { tier: 1, icon: "📯", name: "집결 나팔",   kind: "cooldown", cd: 15, desc: "모든 아군을 내 곁으로 불러온다 (0.5초 무적)",
                use(h, g) { const p = h.transform.position; let n = 0; for (const o of g.heroes) { if (o === h || !o.alive) continue; const a = (n++) * 2.1; const [x, y] = g.pushOut(p.x + Math.cos(a) * 14, p.y + Math.sin(a) * 14, o.radius); o.transform.setPosition(x, y); o.invuln = Math.max(o.invuln, 0.5); g.puff(o, ["#fff", "#ffe082"]); } SFX.play("door"); return n > 0; } },
   horn:      { tier: 2, icon: "📯", name: "전쟁 나팔",   kind: "cooldown", cd: 20, desc: "주변 적 탄 제거 + 적을 밀어냄",
                use(h, g) { const p = h.transform.position; g.shockwave(p.x, p.y, 95, 3, 240, h); return true; } },
-  drum:      { tier: 2, icon: "🥁", name: "분노의 북",   kind: "charge", max: 4, desc: "방 안의 모든 적에게 피해",
+  drum:      { tier: 2, icon: "🥁", name: "분노의 북",   kind: "charge", max: 3, desc: "방 안의 모든 적에게 피해",
                use(h, g) { for (const e of g.enemies) { if (e.dead || e.spawnDelay > 0) continue; const ep = e.transform.position; e.damage(6 * h.stats.dmg, h, Math.atan2(ep.y - h.transform.position.y, ep.x - h.transform.position.x), 40); g.fx.emit(ep.x, ep.y, { count: 4, colors: ["#ff8a65", "#fff"], speed: [20, 60], life: [0.15, 0.3], size: [1, 2], fade: true }); } g.cam.shake(4, 0.3); SFX.play("boom"); return true; } },
-  hourglass: { tier: 2, icon: "⏳", name: "모래시계",     kind: "charge", max: 4, desc: "5초간 모든 적 둔화",
+  hourglass: { tier: 2, icon: "⏳", name: "모래시계",     kind: "charge", max: 3, desc: "5초간 모든 적 둔화",
                use(h, g) { for (const e of g.enemies) { if (e.dead) continue; e.slowT = 5; e.slowMul = 0.4; } g.cam.shake(1.5, 0.2); SFX.play("warn"); return true; } },
   freezeblast: { tier: 2, icon: "🌨️", name: "서리 폭풍", kind: "cooldown", cd: 22, desc: "주변 90 안의 적을 얼린다 (보스는 둔화)",
                use(h, g) { const p = h.transform.position; itemsAoe(g, p.x, p.y, 90, 0, h, ["#e1f5fe", "#81d4fa"], e => e.addStatus("freeze", 1, h)); g.cam.shake(1.5, 0.2); SFX.play("warn"); return true; } },
-  poisoncloud: { tier: 2, icon: "☠️", name: "독안개 병", kind: "charge", max: 3, desc: "방 안의 모든 적을 중독시킨다",
+  poisoncloud: { tier: 2, icon: "☠️", name: "독안개 병", kind: "charge", max: 2, desc: "방 안의 모든 적을 중독시킨다",
                use(h, g) { let n = 0; for (const e of g.enemies) { if (e.dead || e.spawnDelay > 0) continue; e.addStatus("poison", 1, h); n++; const ep = e.transform.position; g.fx.emit(ep.x, ep.y, { count: 3, colors: ["#9ccc65"], speed: [8, 24], life: [0.3, 0.5], size: [1.5, 2.5], fade: true }); } SFX.play("warn"); return n > 0; } },
   bloodrite: { tier: 2, icon: "🩸", name: "피의 의식",   kind: "cooldown", cd: 25, desc: "HP 1을 바치고 8초간 공격력 +60%, 공격 속도 +25%",
                use(h, g) { if (h.hp <= 1) return false; h.hp -= 1; h.addBuff(8, 0.6, 0.25, 0); g.puff(h, ["#e53935", "#fff"]); SFX.play("warn"); return true; } },
@@ -427,15 +427,17 @@ const ACTIVES = {
   // ── 주사위 · 방/아이템 조작 ──
   d1:        { tier: 1, icon: "🎲", name: "작은 주사위", kind: "charge", max: 2, desc: "가장 가까운 바닥 아이템 하나를 다른 것으로 바꾼다",
                use(h, g) { if (!rerollNearest(h, g)) return false; g.puff(h, ["#ce93d8", "#fff"]); SFX.play("item"); return true; } },
-  d6:        { tier: 2, icon: "🎲", name: "D6", kind: "charge", max: 3, desc: "가진 패시브를 모두 무작위 다른 아이템으로 바꾼다",
+  d6:        { tier: 2, icon: "🎲", name: "붉은 주사위", kind: "charge", max: 4, desc: "가진 패시브를 모두 무작위 다른 아이템으로 바꾼다",
                use(h, g) { if (!rerollItems(h)) return false; g.puff(h, ["#ce93d8", "#fff"]); g.cam.shake(2, 0.2); SFX.play("item"); return true; } },
+  bluedice:  { tier: 2, icon: "🎲", name: "푸른 주사위", kind: "charge", max: 3, desc: "현재 방에 떨어진 픽업(코인·열쇠·하트·상자·꾸러미)을 무작위 픽업으로 바꾼다",
+               use(h, g) { if (!rerollRoomPickups(g)) return false; SFX.play("item"); return true; } },
   tarot:     { tier: 1, icon: "🃏", name: "점쟁이 카드", kind: "cooldown", cd: 25, desc: "바닥(상점 포함)의 아이템·무기를 다시 뽑는다",
                use(h, g) { return rerollPickups(g); } },
-  alchemy:   { tier: 2, icon: "⚗️", name: "연금술 가루", kind: "charge", max: 3, desc: "바닥의 동전→열쇠→하트→동전으로 바꾼다",
+  alchemy:   { tier: 2, icon: "⚗️", name: "연금술 가루", kind: "charge", max: 2, desc: "바닥의 동전→열쇠→하트→동전으로 바꾼다",
                use(h, g) { return convertPickups(g); } },
   exchange:  { tier: 1, icon: "💱", name: "환전소", kind: "cooldown", cd: 10, desc: "6G를 열쇠 1개로 (골드가 모자라면 열쇠 1개를 4G로)",
                use(h, g) { if (g.gold >= 6) { g.gold -= 6; g.addKey(1); } else if (g.keys > 0) { g.keys--; g.gold += 4; } else return false; g.puff(h, ["#ffe082", "#fff"]); SFX.play("coin"); return true; } },
-  roulette:  { tier: 1, icon: "🎡", name: "룰렛", kind: "charge", max: 3, desc: "무작위: 회복·골드·열쇠·무적·적 전체 피해 … 가끔 HP -1",
+  roulette:  { tier: 1, icon: "🎡", name: "룰렛", kind: "charge", max: 2, desc: "무작위: 회복·골드·열쇠·무적·적 전체 피해 … 가끔 HP -1",
                use(h, g) { const r = Math.floor(Math.random() * 7); g.puff(h, ["#ffee58", "#fff"]); SFX.play("item");
                  if (r === 0) h.heal(2); else if (r === 1) g.addGold(10); else if (r === 2) g.addKey(2); else if (r === 3) h.invuln = Math.max(h.invuln, 4);
                  else if (r === 4) { for (const e of g.enemies) if (!e.dead && e.spawnDelay <= 0) e.damage(5 * h.stats.dmg, h, -Math.PI / 2, 30); } else if (r === 5) g.spawnBomb(h.transform.position.x, h.transform.position.y, h);
@@ -445,28 +447,28 @@ const ACTIVES = {
                use(h, g) { return warp(g, "random"); } },
   recall:    { tier: 1, icon: "🪨", name: "귀환석", kind: "floor", max: 1, desc: "시작 방으로 돌아간다 (층마다 1회)",
                use(h, g) { return warp(g, "start"); } },
-  replay:    { tier: 3, icon: "⏪", name: "되감기 시계", kind: "charge", max: 2, desc: "클리어한 일반·엘리트 방을 한 번 더 — 적이 다시 나오고 보상도 다시 (방마다 1회)",
+  replay:    { tier: 3, icon: "⏪", name: "되감기 시계", kind: "charge", max: 3, desc: "클리어한 일반·엘리트 방을 한 번 더 — 적이 다시 나오고 보상도 다시 (방마다 1회)",
                use(h, g) { return replayRoom(g); } },
   // ── 소환 · 협동 ──
-  clonecall: { tier: 2, icon: "🧍", name: "분신 소환", kind: "charge", max: 3, desc: "10초간 옆에서 내 공격을 따라하는 분신을 부른다",
+  clonecall: { tier: 2, icon: "🧍", name: "분신 소환", kind: "charge", max: 2, desc: "10초간 옆에서 내 공격을 따라하는 분신을 부른다",
                use(h, g) { spawnTempClone(g, h, 10); g.puff(h, ["#b39ddb", "#fff"]); SFX.play("swap"); return true; } },
-  turretitem: { tier: 2, icon: "🗼", name: "포탑 설치", kind: "charge", max: 3, desc: "10초간 가까운 적을 쏘는 자동 포탑을 세운다",
+  turretitem: { tier: 2, icon: "🗼", name: "포탑 설치", kind: "charge", max: 2, desc: "10초간 가까운 적을 쏘는 자동 포탑을 세운다",
                use(h, g) { const p = h.transform.position; spawnTurret(g, h, p.x + Math.cos(h.facing) * 14, p.y + Math.sin(h.facing) * 14, 10); SFX.play("swap"); return true; } },
-  lifebell:  { tier: 3, icon: "🛎️", name: "부활의 종", kind: "charge", max: 6, desc: "쓰러진 아군 한 명을 HP 절반으로 되살린다",
+  lifebell:  { tier: 3, icon: "🛎️", name: "부활의 종", kind: "charge", max: 4, desc: "쓰러진 아군 한 명을 HP 절반으로 되살린다",
                use(h, g) { const d = g.heroes.find(o => !o.alive); if (!d) return false; const p = h.transform.position; d.transform.setPosition(p.x + 12, p.y); d.revive(Math.ceil(d.maxHp / 2)); g.puff(d, ["#fff59d", "#fff"]); SFX.play("clear"); return true; } },
   transfusion: { tier: 2, icon: "💉", name: "수혈", kind: "cooldown", cd: 12, desc: "내 HP 1을 가장 아픈 아군에게 준다 (내 HP 2 이상일 때)",
                use(h, g) { const a = lowestAlly(g, h); if (!a || a.hp >= a.maxHp || h.hp < 2) return false; h.hp--; a.heal(1); g.puff(a, ["#ef5350", "#fff"]); SFX.play("swap"); return true; } },
   // ── 공격 ──
-  voodoo:    { tier: 2, icon: "🪆", name: "저주 인형", kind: "charge", max: 4, desc: "모든 적에게 저주: 큰 피해 + 출혈 + 중독",
+  voodoo:    { tier: 2, icon: "🪆", name: "저주 인형", kind: "charge", max: 3, desc: "모든 적에게 저주: 큰 피해 + 출혈 + 중독",
                use(h, g) { let n = 0; for (const e of g.enemies) { if (e.dead || e.spawnDelay > 0) continue; n++; const ep = e.transform.position; e.damage(4 * h.stats.dmg, h, -Math.PI / 2, 20); e.addStatus("bleed", 1, h); e.addStatus("poison", 1, h); g.fx.emit(ep.x, ep.y, { count: 4, colors: ["#7b1fa2", "#ce93d8"], speed: [10, 40], life: [0.2, 0.4], size: [1, 2], fade: true }); } SFX.play("warn"); return n > 0; } },
-  vengeance: { tier: 2, icon: "🗡️", name: "복수의 칼날", kind: "kill", per: 12, max: 3, desc: "사방으로 관통 칼날 12발",
+  vengeance: { tier: 2, icon: "🗡️", name: "복수의 칼날", kind: "kill", per: 12, max: 2, desc: "사방으로 관통 칼날 12발",
                use(h, g) { const p = h.transform.position; for (let k = 0; k < 12; k++) g.spawnProj(p.x, p.y, k * Math.PI / 6, 210, 2.5 * h.stats.dmg, true, { owner: h, pierce: true, life: 0.9, radius: 3, knock: 60, color: "#ef9a9a" }); SFX.play("boom"); return true; } },
   rage:      { tier: 3, icon: "💢", name: "분노 게이지", kind: "dmg", per: 90, max: 2, desc: "8초간 공격력 +70%, 공격 속도 +20%, 이동 +30%",
                use(h, g) { h.addBuff(8, 0.7, 0.2, 0.3); g.puff(h, ["#ff5252", "#fff"]); SFX.play("warn"); return true; } },
 };
 for (const it of Object.values(ACTIVES)) it.price = ITEM_TIERS[it.tier].price;
 const CHARGED = { charge: 1, kill: 1, dmg: 1, floor: 1 }; // 충전 횟수로 쓰는 종류 (cooldown만 시간으로 쓴다)
-const activeNote = def => def.kind === "charge" ? `방 클리어마다 충전 (최대 ${def.max})` : def.kind === "kill" ? `적 ${def.per}마리 처치마다 충전 (최대 ${def.max})` : def.kind === "dmg" ? `피해 ${def.per}마다 충전 (최대 ${def.max})` : def.kind === "floor" ? `층마다 ${def.max}회` : `쿨타임 ${def.cd}초`;
+const activeNote = def => def.kind === "charge" ? `방 클리어 ${def.max}번이면 충전 완료` : def.kind === "kill" ? `적 ${def.per * def.max}마리 처치하면 충전 완료` : def.kind === "dmg" ? `피해 ${def.per * def.max} 누적하면 충전 완료` : def.kind === "floor" ? `층마다 충전` : `쿨타임 ${def.cd}초`;
 const activeLabel = a => a ? `${ACTIVES[a.id].icon}${ACTIVES[a.id].name} ${CHARGED[ACTIVES[a.id].kind] ? `${a.charge}/${ACTIVES[a.id].max}` : a.cdLeft > 0 ? Math.ceil(a.cdLeft) + "초" : "준비"}` : "";
 
 // 모든 아이템 확률 균등. exclude: 이미 뽑은 id 집합 (모자라면 중복 허용)

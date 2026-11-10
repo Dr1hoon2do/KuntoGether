@@ -115,9 +115,9 @@ class Hero extends Component {
   useActive() {
     const a = this.active; if (!a) return;
     const def = ACTIVES[a.id], g = this.game;
-    if (CHARGED[def.kind] ? a.charge <= 0 : a.cdLeft > 0) { if (!this._actDenied || this._actDenied < performance.now()) { SFX.play("block"); this._actDenied = performance.now() + 400; } return; }
+    if (CHARGED[def.kind] ? a.charge < def.max : a.cdLeft > 0) { if (!this._actDenied || this._actDenied < performance.now()) { SFX.play("block"); this._actDenied = performance.now() + 400; } return; }
     if (!def.use(this, g)) return;
-    if (CHARGED[def.kind]) a.charge--; else a.cdLeft = def.cd;
+    if (CHARGED[def.kind]) a.charge = 0; else a.cdLeft = def.cd; // 충전형: 가득 차야 쓸 수 있고, 쓰면 전부 소모 (아이작식)
     this.fire("active", a.id);
   }
 
