@@ -21,7 +21,7 @@ class Game extends Component {
     this.floorNum = 1; this.map = null; this.cur = null; this.state = "explore"; // explore | fight | over | victory
     this.nextId = 0; this.overTimer = 0; this.introTimer = 0; this.introText = "";
     this.doorHold = 0; this.stairsHold = 0; this.stairsGO = null;
-    this.usedBosses = new Set(); this.gold = 0; this.keys = 0; this.obstacles = []; this.walls = []; this.bombs = []; this.spObjs = []; this.sp = null; this.stairsPos = null; this.portalPos = null; this.portalHold = 0; this.bossHits = 0; // gold·keys: 팀 공유
+    this.usedBosses = new Set(); this.gold = 0; this.keys = 0; this.obstacles = []; this.walls = []; this.tiles = null; this.runSeed = 0; this.bombs = []; this.spObjs = []; this.sp = null; this.stairsPos = null; this.portalPos = null; this.portalHold = 0; this.bossHits = 0; // gold·keys: 팀 공유
     this.difficulty = "normal"; this.runStarted = false; // 난이도는 첫 문으로 나가기 전(런 시작 전)에만 바꿀 수 있다
   }
   awake() {
@@ -124,7 +124,7 @@ class Game extends Component {
   // 원(x,y,r)이 지형에 겹치면 밖으로 밀어낸다. [x, y, 막혔는지]
   pushOut(x, y, r) { const o = Game._po; Physics.moveCircle(x, y, r, 0, 0, PL.Solid, o); return [o.x, o.y, o.hit]; }
   static _po = { x: 0, y: 0, hit: false, nx: 0, ny: 0, collider: null };
-  obstacleAt(x, y, r) { const c = Physics.pointQuery(x, y, r, PL.Obstacle); return c ? c.data : null; }
+  obstacleAt(x, y, r) { const c = Physics.pointQuery(x, y, r, PL.Obstacle | PL.Pit); return c ? c.data : null; }
   // 폭발: 적에게 eDmg, 플레이어에게 hDmg(0이면 안 다침), 범위 안의 바위·상자·통은 부서진다
   explode(x, y, r, eDmg, hDmg, src) {
     const buf = []; // 피해 중에 연쇄 폭발이 같은 질의 버퍼를 덮어쓰지 않게 새 배열을 쓴다
@@ -132,7 +132,19 @@ class Game extends Component {
     if (hDmg > 0) { n = Physics.overlapCircle(x, y, r, PL.Hero, buf); for (let i = 0; i < n; i++) { const h = buf[i].data; if (h.alive) h.hit(hDmg, x, y, 160); } }
     n = Physics.overlapCircle(x, y, r, PL.Obstacle, buf); for (let i = 0; i < n; i++) { const o = buf[i].data; if (o.destructible) o.damage(99, src, true); }
     this.fx.emit(x, y, { count: 26, colors: ["#ff7043", "#ffee58", "#fff"], speed: [40, 130], life: [0.2, 0.5], size: [1.5, 3], fade: true, area: r * 0.3 });
+    this.secretDamage(x, y, 99, r + 14); // 폭발은 숨은 벽을 한 번에 깬다
     this.cam.shake(4, 0.25); SFX.play("boom");
+  }
+  // 비밀방: 현재 방에 숨은 문이 있으면 그 벽(금간 곳) 가까이의 폭발·공격이 벽을 깬다. dmg는 누적(체력 12), 폭발은 한 번에 깬다.
+  secretPoint() { const r = this.cur; if (!r || !r.secret || !r.secret.hidden) return null; const [x, y] = doorPos(r.secretDir); return { x, y, dir: r.secretDir }; }
+  secretDamage(x, y, dmg, reach = 22) {
+    const sp = this.secretPoint(); if (!sp || Math.hypot(sp.x - x, sp.y - y) > reach) return false;
+    const r = this.cur; r.secretHp = (r.secretHp ?? 12) - dmg; r.secretFlash = 0.15; SFX.play("hit");
+    this.fx.emit(sp.x, sp.y, { count: 4, colors: ["#9e9e9e", "#5d5d6b"], speed: [10, 40], life: [0.2, 0.4], size: [1, 2], fade: true });
+    if (r.secretHp > 0) return true;
+    revealSecret(this.map, r); this.doorHold = 0; this.cam.shake(4, 0.3); SFX.play("boom");
+    this.fx.emit(sp.x, sp.y, { count: 30, colors: ["#8d8d99", "#5d5d6b", "#fff"], speed: [30, 110], life: [0.3, 0.7], size: [1.5, 3], fade: true, area: 8 });
+    return true;
   }
   cancelProjectiles(x, y, r) { const buf = [], n = Physics.overlapCircle(x, y, r, PL.EProj, buf); for (let i = 0; i < n; i++) { const pr = buf[i].data; if (pr.fromPlayer || pr.gameObject.isDestroyed || pr.orbit) continue; pr.gameObject.destroy(); } }
   shockwave(x, y, r, dmg, knock, hero) {
@@ -177,13 +189,18 @@ class Game extends Component {
   spawnChest(x, y) { return this._makePickup({ type: "chest", x, y, lock: 0.6 }); }
   // 방 안의 빈 자리 (큰 방이면 아무 칸, 지형 위는 피한다)
   _dropSpot(spread = 55) {
-    const cells = ARENA.cells && ARENA.cells.length ? ARENA.cells : [{ x: 0, y: 0 }]; let x = 0, y = 0;
+    const cells = ARENA.cells && ARENA.cells.length ? ARENA.cells : [{ x: 0, y: 0 }], m = this.tiles, lay = this.cur && this.cur.layout; let x = 0, y = 0;
     for (let t = 0; t < 14; t++) {
       const c = cells[Math.floor(Math.random() * cells.length)]; x = c.x + (Math.random() * 2 - 1) * spread; y = c.y + (Math.random() * 2 - 1) * spread * 0.7;
+      if (m) { // 타일 기준: 비어 있고 닿을 수 있는 타일의 가운데 근처
+        const i = m.ti(x), j = m.tj(y);
+        if (m.free(i, j) && (!lay || !lay.reach || lay.reach[m.ix(i, j)])) return { x: m.cx(i) + (Math.random() - 0.5) * 10, y: m.cy(j) + (Math.random() - 0.5) * 10 };
+        continue;
+      }
       let bad = false; for (const o of this.obstacles) { const q = o.transform.position; if (Math.abs(q.x - x) < o.w / 2 + 9 && Math.abs(q.y - y) < o.h / 2 + 9) { bad = true; break; } }
       if (!bad) break;
     }
-    return { x, y };
+    return this._freeSpot(x, y, 10);
   }
   spawnHeart(x, y, price = 0) { return this._makePickup({ type: "heart", price, x, y }); }
   spawnWeaponPickup(x, y, weapon, price = 0, lock = 0.8) { return this._makePickup({ type: "weapon", weapon, price, x, y, lock }); }
@@ -203,10 +220,11 @@ class Game extends Component {
   // ---------- 런·층·방 ----------
   startRun() {
     for (const h of this.roster.values()) { h.resetRun(); h.alive = true; h.invuln = 0; }
+    this.runSeed = Game.fixedSeed != null ? Game.fixedSeed : (Math.random() * 4294967296) >>> 0; // 같은 시드 = 같은 층 구성·같은 방 배치 (?seed= 로 고정)
     this.usedBosses = new Set(); this.gold = 0; this.keys = 0; this.floorNum = 1; this.runStarted = false; this.startFloor();
   }
   startFloor() {
-    this._clearObjects(); this.cur = null; this.map = generateFloor(this.floorNum);
+    this._clearObjects(); this.cur = null; const rg = new Rng(hash2(this.runSeed, this.floorNum)); this.map = generateFloor(this.floorNum, undefined, () => rg.f());
     this.enterRoom(this.map.start, null);
     
   }
@@ -230,6 +248,7 @@ class Game extends Component {
     applyGeo(room); // 방 모양(1~4칸)과 크기. 카메라 배율은 그대로
     const hw0 = ARENA.w / 2, hh0 = ARENA.h / 2; this.camFollow.bounds = { minX: -hw0, maxX: hw0, minY: -hh0, maxY: hh0 };
     if (room.obs === null) room.obs = generateObstacles(room, this.floorNum);
+    this.tiles = room.tiles; // 이 방의 타일맵 (부서진 지형은 여기서도 바닥이 된다)
     this._buildWalls();
     for (const d of room.obs) this._makeObstacle(d);
     for (const v of ARENA.voids) this._makeObstacle({ kind: "void", x: v.x, y: v.y, w: ARENA.BASE_W, h: ARENA.BASE_H, hp: 999 }); // L자 방의 빈 칸
@@ -261,7 +280,7 @@ class Game extends Component {
     else if (room.type === "boss") { this.bossHits = 0; this._spawnBoss(); }
     else if (room.type === "treasure") { room.cleared = true; this._stockTreasure(np); }
     else if (room.type === "shop") { room.cleared = true; this._stockShop(np); }
-    else if (SPECIAL_ROOMS[room.type] || room.type === "devil") Specials.populate(this, room, np);
+    else if (SPECIAL_ROOMS[room.type] || room.type === "devil" || room.type === "secret") Specials.populate(this, room, np);
   }
   // 적 등장 자리: 레이아웃의 등장 구역(없으면 방 전체)에서, 도달 가능하고 지형·플레이어에서 떨어진 곳
   _spawnPos() {
@@ -271,9 +290,10 @@ class Game extends Component {
       let x, y;
       if (zones) { let r = Math.random() * tot, z = zones[0]; for (const q of zones) { r -= q.wt; if (r < 0) { z = q; break; } } x = z.x + (Math.random() * 2 - 1) * z.hw; y = z.y + (Math.random() * 2 - 1) * z.hh; }
       else { const c = cells[Math.floor(Math.random() * cells.length)]; x = c.x + (Math.random() * 2 - 1) * (ARENA.BASE_W / 2 - 25); y = c.y + (Math.random() * 2 - 1) * (ARENA.BASE_H / 2 - 25); }
-      if (this.heroes.every(h => Math.hypot(h.transform.position.x - x, h.transform.position.y - y) > (i < 25 ? 70 : 40)) && !this.obstacleAt(x, y, 16) && layoutReach(lay, x, y)) return [x, y];
+      if (this.tiles) { const m = this.tiles, ti = m.ti(x), tj = m.tj(y); x = m.cx(ti) + (Math.random() - 0.5) * 8; y = m.cy(tj) + (Math.random() - 0.5) * 8; } // 타일 가운데에 선다 (한 칸 폭 통로에도 들어간다)
+      if (this.heroes.every(h => Math.hypot(h.transform.position.x - x, h.transform.position.y - y) > (i < 25 ? 70 : 40)) && !this.obstacleAt(x, y, 11) && layoutReach(lay, x, y)) return [x, y];
     }
-    const q = this._freeSpot(0, 0, 16); return [q.x, q.y];
+    const q = this._freeSpot(0, 0, 11); return [q.x, q.y];
   }
   // (x,y) 근처에서 지형에 안 겹치는 가장 가까운 자리 (방 안, 나선형으로 찾는다)
   _freeSpot(x, y, r = 12) {

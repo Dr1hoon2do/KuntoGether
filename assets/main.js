@@ -27,6 +27,8 @@
     const tick = (t) => { if (lastT) { const d = t - lastT; if (d < 200) { acc += d; n++; } } lastT = t; requestAnimationFrame(tick); };
     requestAnimationFrame(tick);
   }
+  const qs = new URLSearchParams(location.search).get("seed"); // tv.html?seed=123 (숫자 또는 아무 글자) — 같은 시드면 같은 층·방 배치
+  if (qs !== null && qs !== "") { let h = 2166136261; for (const ch of qs) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } Game.fixedSeed = /^\d+$/.test(qs) ? (+qs >>> 0) : (h >>> 0); }
   const go = App.create("game");
   const game = go.addComponent(new Game(App));
   window.game = game; // 디버깅용

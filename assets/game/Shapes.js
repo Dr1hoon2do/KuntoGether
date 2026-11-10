@@ -26,14 +26,14 @@ const DRAW_MATRIX = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 const ROOM_COLORS = { start: "#5c8", normal: "#889", elite: "#fa4", treasure: "#fd3", shop: "#4d8", boss: "#f55" };
 const ROOM_ICONS = { start: "◆", normal: "·", elite: "!", treasure: "★", shop: "$", boss: "☠" };
 for (const [k, v] of Object.entries(SPECIAL_ROOMS)) { ROOM_COLORS[k] = v.color; ROOM_ICONS[k] = v.icon; }
-ROOM_COLORS.devil = "#b71c1c"; ROOM_ICONS.devil = "Ψ"; // 특수 방(가시·희생·도박·매복·서재)
+ROOM_COLORS.devil = "#b71c1c"; ROOM_ICONS.devil = "Ψ"; ROOM_COLORS.secret = "#b39ddb"; ROOM_ICONS.secret = "?"; // 특수 방(가시·희생·도박·매복·서재)
 const FLOOR_TINTS = ["#2a2420", "#232a28", "#2a2329", "#292a22", "#222a2a", "#2a2222", "#28242c", "#2c2020"];
 const DOOR_W = 30;
 class ArenaRenderer extends Renderer {
   constructor(game) { super(); this.game = game; this.sortingLayer = "Background"; this._c = null; this._key = ""; this._scale = 0; this._built = 0; game.App.clearColor = "#14110f"; }
   // 바닥·격자·바깥 벽은 방이 바뀔 때만 오프스크린 캔버스에 한 번 그려 두고, 매 프레임은 한 번에 찍어 낸다 (예전엔 매 프레임 전체 화면을 여러 번 칠했다).
   _bake(s, tint) {
-    const cw = ARENA.BASE_W, ch = ARENA.BASE_H, cells = ARENA.cells, M = 4;
+    const g = this.game, cw = ARENA.BASE_W, ch = ARENA.BASE_H, cells = ARENA.cells, M = 4;
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (const c of cells) { x0 = Math.min(x0, c.x - cw / 2); x1 = Math.max(x1, c.x + cw / 2); y0 = Math.min(y0, c.y - ch / 2); y1 = Math.max(y1, c.y + ch / 2); }
     x0 -= M; x1 += M; y0 -= M; y1 += M;
@@ -43,13 +43,19 @@ class ArenaRenderer extends Renderer {
     c2.setTransform(1, 0, 0, 1, 0, 0); c2.clearRect(0, 0, W, H);
     c2.setTransform(s, 0, 0, -s, -x0 * s, y1 * s); // 월드 좌표(Y-up) 그대로 그린다
     const has = (dx, dy) => cells.some(c => c.dx === dx && c.dy === dy);
-    for (const c of cells) { // 칸마다 바닥
+    for (const c of cells) { // 칸마다 바닥: 타일(25) 단위로 은은한 체크무늬 + 군데군데 얼룩
       c2.fillStyle = tint; c2.fillRect(c.x - cw / 2, c.y - ch / 2, cw, ch);
+      for (let j = 0; j < TR; j++) for (let i = 0; i < TC; i++) {
+        const x = c.x - cw / 2 + i * TILE, y = c.y - ch / 2 + j * TILE, hsh = (Math.imul(i + c.dx * 16 + 64, 73856093) ^ Math.imul(j + c.dy * 9 + 64, 19349663) ^ (g.floorNum * 83492791)) >>> 0;
+        if ((i + j) & 1) { c2.fillStyle = "#ffffff07"; c2.fillRect(x, y, TILE, TILE); }
+        if (hsh % 9 === 0) { c2.fillStyle = "#0000001c"; c2.fillRect(x + 4 + hsh % 11, y + 5 + (hsh >> 4) % 9, 4 + hsh % 5, 2 + hsh % 3); }
+      }
       c2.strokeStyle = "#ffffff10"; c2.lineWidth = 0.5; c2.beginPath();
-      for (let x = c.x - cw / 2; x <= c.x + cw / 2 + 0.1; x += 25) { c2.moveTo(x, c.y - ch / 2); c2.lineTo(x, c.y + ch / 2); }
-      for (let y = c.y - ch / 2; y <= c.y + ch / 2 + 0.1; y += 25) { c2.moveTo(c.x - cw / 2, y); c2.lineTo(c.x + cw / 2, y); }
+      for (let x = c.x - cw / 2; x <= c.x + cw / 2 + 0.1; x += TILE) { c2.moveTo(x, c.y - ch / 2); c2.lineTo(x, c.y + ch / 2); }
+      for (let y = c.y - ch / 2; y <= c.y + ch / 2 + 0.1; y += TILE) { c2.moveTo(c.x - cw / 2, y); c2.lineTo(c.x + cw / 2, y); }
       c2.stroke();
     }
+    if (g.tiles) drawStaticTiles(c2, g.tiles); // 벽·기둥·구덩이 (타일맵에서)
     c2.strokeStyle = "#6a5a50"; c2.lineWidth = 3; c2.beginPath(); // 바깥 벽: 이웃 칸이 없는 쪽만
     for (const c of cells) {
       const l = c.x - cw / 2, r = c.x + cw / 2, b = c.y - ch / 2, t = c.y + ch / 2;
@@ -65,7 +71,7 @@ class ArenaRenderer extends Renderer {
     const m = camera.viewMatrix, g = this.game, locked = g.state !== "explore";
     const devil = g.cur && g.cur.type === "devil", tint = devil ? "#2b1013" : FLOOR_TINTS[(g.floorNum - 1) % FLOOR_TINTS.length], cells = ARENA.cells; // 악마 상점은 붉은 검정 바닥
     let h = g.floorNum; for (const c of cells) h = (h * 31 + c.x * 7 + c.y * 13) | 0;
-    const s = Math.hypot(m.a, m.b), key = h + "|" + cells.length + (devil ? "d" : "");
+    const s = Math.hypot(m.a, m.b), key = h + "|" + cells.length + (devil ? "d" : "") + "|" + (g.tiles ? g.tiles.uid : 0);
     if (key !== this._key || Math.abs(s - this._scale) > 0.001 * s && performance.now() - this._built > 300) { this._key = key; this._bake(s, tint); }
     const k = s / this._scale; // 배율이 조금 달라도 늘려서 찍는다 (줌 트윈 중 매 프레임 다시 굽지 않게)
     // 화면 픽셀에 맞춰 찍는다 (확대·축소 없이 1:1이면 선이 번지지 않는다)
@@ -74,6 +80,14 @@ class ArenaRenderer extends Renderer {
     if (Math.abs(k - 1) < 1e-3) ctx.drawImage(this._c, Math.round(dx), Math.round(dy)); else ctx.drawImage(this._c, dx, dy, this._c.width * k, this._c.height * k);
     ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
     if (!g.cur) return;
+    const sp = g.secretPoint(); // 비밀방: 벽에 은은한 금이 가 있다 (맞으면 깜빡이며 더 커진다)
+    if (sp) {
+      const fl = g.cur.secretFlash > 0, hpk = 1 - Math.max(0, g.cur.secretHp ?? 12) / 12;
+      if (fl) g.cur.secretFlash -= 1 / 60;
+      ctx.save(); ctx.translate(sp.x, sp.y); if (sp.dir === "N") ctx.scale(1, -1); else if (sp.dir === "E") ctx.rotate(Math.PI / 2); else if (sp.dir === "W") ctx.rotate(-Math.PI / 2); // 로컬 +y = 방 안쪽
+      ctx.strokeStyle = fl ? "#fff" : "#26262d"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-3, 0); ctx.lineTo(-1, 5); ctx.lineTo(-4, 9); ctx.moveTo(-1, 5); ctx.lineTo(3, 8); ctx.lineTo(2, 13 + hpk * 6); ctx.moveTo(3, 8); ctx.lineTo(7, 10 + hpk * 4); ctx.stroke();
+      ctx.strokeStyle = "#8d8d9a66"; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(-2.4, 0.5); ctx.lineTo(-0.2, 5.4); ctx.stroke(); ctx.restore();
+    }
     for (const [d, room] of Object.entries(g.cur.nb)) { // 문
       const [x, y] = doorPos(d), horiz = d === "N" || d === "S";
       ctx.fillStyle = locked ? "#c62828" : room.locked ? "#fdd835" : "#2e7d32"; // 노랑 = 열쇠가 필요한 문
@@ -99,6 +113,7 @@ class MinimapRenderer extends Renderer {
     const C = 9, seen = [], cp = camera.transform.position;
     const compass = g.heroes.some(h => h.stats.compass), special = g.heroes.some(h => h.stats.mapSpecial); // 나침반: 층 전체 공개 / 낡은 지도 조각: 특수 방만 공개
     for (const r of g.map.list) if (compass || r.visited || Object.values(r.nb).some(o => o.visited) || (special && (r.type === "shop" || r.type === "treasure" || r.type === "boss" || SPECIAL_ROOMS[r.type]))) seen.push(r);
+    const hint = compass && g.map.secret && g.map.secret.hidden ? g.map.secret : null; if (hint) seen.push(hint); // 나침반: 숨은 방의 자리만 어렴풋이 (문은 아직 없다)
     if (!seen.length) return;
     const cells = seen.flatMap(r => r.cells.map(([dx, dy]) => [r.x + dx, r.y + dy]));
     const xs = cells.map(c => c[0]), ys = cells.map(c => c[1]);
@@ -106,6 +121,7 @@ class MinimapRenderer extends Renderer {
     const ox = cp.x + camera.viewWidth / 2 - 46, oy = cp.y + camera.viewHeight / 2 - 30; // 화면 오른쪽 위
     ctx.globalAlpha = 0.85;
     for (const r of seen) {
+      if (r === hint) { const hx = ox + (r.x - cx) * C, hy = oy + (r.y - cy) * C; ctx.strokeStyle = "#b39ddb"; ctx.lineWidth = 0.8; ctx.setLineDash([1.5, 1.5]); ctx.strokeRect(hx - 3.5, hy - 3.5, 7, 7); ctx.setLineDash([]); continue; }
       const col = ROOM_COLORS[r.type], big = r.cells.length > 1;
       for (const [dx, dy] of r.cells) {
         const x = ox + (r.x + dx - cx) * C, y = oy + (r.y + dy - cy) * C, sz = big ? C : 7;

@@ -1,15 +1,16 @@
 // 물리 레이어 (KuntoGame Physics). Solid = 캐릭터·탄이 부딪히는 것 (방 벽 + 지형지물)
-const PL = { Wall: Physics.layer("Wall"), Obstacle: Physics.layer("Obstacle"), Hero: Physics.layer("Hero"), Enemy: Physics.layer("Enemy"), EProj: Physics.layer("EProj"), Pickup: Physics.layer("Pickup") };
-PL.Solid = PL.Wall | PL.Obstacle;
+const PL = { Wall: Physics.layer("Wall"), Obstacle: Physics.layer("Obstacle"), Pit: Physics.layer("Pit"), Hero: Physics.layer("Hero"), Enemy: Physics.layer("Enemy"), EProj: Physics.layer("EProj"), Pickup: Physics.layer("Pickup") };
+PL.Solid = PL.Wall | PL.Obstacle | PL.Pit; // Pit(구덩이): 걸어서는 못 지나가지만 탄은 지나간다
 const ROCK_R = 9; // 바위의 모서리 반지름 (그림과 충돌 모양이 같다)
 // 지형지물: 움직임과 탄을 막는다.
 //   pillar : 기둥(안 부서짐)           wall : 긴 기둥(안 부서짐, 엄폐용)
 //   rock   : 바위 — 폭발(폭탄·폭발 통·폭발 구슬)로만 부서짐
 //   crate  : 상자 — 아무 공격으로 부서짐, 가끔 코인
 //   barrel : 폭발 통 — 부서지면 주변에 폭발(적·플레이어 모두 피해, 바위·상자도 연쇄 파괴)
+//   pit    : 구덩이 — 캐릭터는 못 지나가고 탄은 지나간다 (벽과 같이 타일맵에서 큰 직사각형으로 합쳐 만든다)
 //   void   : L자 방의 빈 칸(보이지 않는 벽)
 //   altar  : 희생방의 제단(원, 안 부서짐) · machine : 도박방의 기계(상자꼴, 안 부서짐) — 동작은 Specials.js
-// 크기는 플레이어(지름 12)의 2~6배 — 탄막을 피해 숨거나 엄폐할 수 있을 만큼 크다.
+// 지형은 타일맵(TileMap.js)에서 만들어진다: 한 타일 = 25 (플레이어 지름 12의 2배). 벽·기둥·구덩이는 타일맵을 구울 때 같이 그려져서(drawStaticTiles) 여기서는 충돌만 맡는다.
 class Obstacle extends Component {
   constructor(game, d) {
     super();
@@ -17,10 +18,11 @@ class Obstacle extends Component {
     this.seed = Math.random() * 100;
   }
   get destructible() { return this.kind === "crate" || this.kind === "barrel" || this.kind === "rock"; }
-  get solidOnly() { return this.kind === "pillar" || this.kind === "wall" || this.kind === "void" || this.kind === "altar" || this.kind === "machine"; } // 부서지지 않는 종류
+  get solidOnly() { return this.kind === "pillar" || this.kind === "wall" || this.kind === "void" || this.kind === "altar" || this.kind === "machine" || this.kind === "pit"; } // 부서지지 않는 종류
+  get baked() { return this.kind === "pillar" || this.kind === "wall" || this.kind === "pit" || this.kind === "void"; } // 방 바닥 캔버스에 구워 그려지는 종류 (따로 안 그린다)
   setup() {
-    this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), Math.max(this.w, this.h) + 6, { order: 2 }));
-    const o = { layer: "Obstacle", body: "static", data: this }; // 충돌 모양 = 그려지는 모양
+    if (!this.baked) this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), Math.max(this.w, this.h) + 6, { order: 2 }));
+    const o = { layer: this.kind === "pit" ? "Pit" : "Obstacle", body: "static", data: this }; // 충돌 모양 = 그려지는 모양
     this.col = this.gameObject.addComponent(this.kind === "barrel" || this.kind === "altar" ? Collider2D.circle(this.w / 2, o) : this.kind === "rock" ? Collider2D.rbox(this.w, this.h, ROCK_R, o) : Collider2D.box(this.w, this.h, o));
   }
   data() { const p = this.transform.position; return { kind: this.kind, w: this.w, h: this.h, hp: this.hp, x: p.x, y: p.y }; }
@@ -72,7 +74,7 @@ class Obstacle extends Component {
   die(by) {
     if (this.dead) return; this.dead = true;
     const g = this.game, p = this.transform.position;
-    g.obstacles = g.obstacles.filter(o => o !== this);
+    g.obstacles = g.obstacles.filter(o => o !== this); if (g.tiles) g.tiles.clearAt(p.x, p.y); // 타일맵에서도 사라진다
     g.fx.emit(p.x, p.y, { count: 10, colors: this.kind === "crate" ? ["#a47532", "#5a3d14"] : this.kind === "rock" ? ["#7b6a58", "#3e342a"] : ["#c0392b", "#ff8a65"], speed: [20, 70], life: [0.2, 0.45], size: [1, 2.2], fade: true });
     const cg = g.partySum("crateGold"); // 도토리: 상자·통을 부수면 코인 확정
     if (this.kind === "crate" && Math.random() < ECON.crate.coin) g.spawnCoin(p.x, p.y, g.rollCoinValue(0));

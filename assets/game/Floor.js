@@ -25,6 +25,7 @@ const ROOM_NAMES = { start: "시작 방", normal: "일반 방", elite: "엘리�
 // 특수 방: 막다른 방에 가끔 나온다. 층마다 종류별로 최대 1개, 한 층에 최대 MAX_SPECIAL개. min~max 층에서만, chance 확률로 (동작은 Specials.js)
 //   보물방·상점은 5층까지만(SPECIAL_ROOM_FLOORS) 나오지만, 특수 방은 아래 범위를 따른다. locked: 열쇠 1개로 문을 연다
 const MAX_SPECIAL = 2;
+const SECRET_MIN = 2, SECRET_MAX = 7, SECRET_CHANCE = 0.25; // 비밀방이 나오는 층 범위와 확률
 const SPECIAL_ROOMS = {
   spike:     { name: "가시방", color: "#ef5350", icon: "▲", min: 2, max: 8, chance: 0.26 },
   sacrifice: { name: "희생방", color: "#d81b60", icon: "✚", min: 2, max: 7, chance: 0.22 },
@@ -34,13 +35,15 @@ const SPECIAL_ROOMS = {
 };
 for (const [k, v] of Object.entries(SPECIAL_ROOMS)) ROOM_NAMES[k] = v.name;
 ROOM_NAMES.devil = "악마 상점"; // 보스 방 옆방 (지도에는 없다: Specials.openDevil)
+ROOM_NAMES.secret = "비밀방"; // 숨겨진 막다른 방 (벽을 부수면 문이 열린다)
 // 이번 층에 나올 특수 방 종류 (확률대로 굴려서 최대 MAX_SPECIAL개)
 function rollSpecials(f, rnd = Math.random) {
-  const out = []; for (const k of Object.keys(SPECIAL_ROOMS).sort(() => rnd() - 0.5)) { const s = SPECIAL_ROOMS[k]; if (out.length < MAX_SPECIAL && f >= s.min && f <= s.max && rnd() < s.chance) out.push(k); }
+  const out = []; for (const k of (() => { const a = Object.keys(SPECIAL_ROOMS); for (let k = a.length - 1; k > 0; k--) { const m = Math.floor(rnd() * (k + 1)); [a[k], a[m]] = [a[m], a[k]]; } return a; })()) { const s = SPECIAL_ROOMS[k]; if (out.length < MAX_SPECIAL && f >= s.min && f <= s.max && rnd() < s.chance) out.push(k); }
   return out;
 }
 
-function generateFloor(f, forceSpecials) {
+function generateFloor(f, forceSpecials, rnd = Math.random) {
+  const shuf = arr => { const a = arr.slice(); for (let k = a.length - 1; k > 0; k--) { const m = Math.floor(rnd() * (k + 1)); [a[k], a[m]] = [a[m], a[k]]; } return a; }; // 시드 난수로 섞기
   const key = (x, y) => x + "," + y, rooms = new Map();
   const add = (x, y, type) => { const r = { x, y, type, visited: false, cleared: false, spawned: false, items: [], obs: null, big: false, cells: [[0, 0]], nb: {}, dist: 0 }; rooms.set(key(x, y), r); return r; };
   const occ = (x, y) => Object.values(DIRS).filter(([dx, dy]) => rooms.has(key(x + dx, y + dy))).length;
@@ -48,8 +51,8 @@ function generateFloor(f, forceSpecials) {
   const start = add(0, 0, "start");
   const target = Math.min(7 + f, 13);
   for (let guard = 0; rooms.size < target && guard < 800; guard++) {
-    const list = [...rooms.values()], base = list[Math.floor(Math.random() * list.length)];
-    const [, [dx, dy]] = entries[Math.floor(Math.random() * 4)];
+    const list = [...rooms.values()], base = list[Math.floor(rnd() * list.length)];
+    const [, [dx, dy]] = entries[Math.floor(rnd() * 4)];
     const nx = base.x + dx, ny = base.y + dy;
     if (rooms.has(key(nx, ny)) || occ(nx, ny) > 1) continue; // 이웃이 둘 이상이면 고리가 생기므로 제외
     add(nx, ny, "normal");
@@ -62,18 +65,18 @@ function generateFloor(f, forceSpecials) {
   link();
   const leaves = () => [...rooms.values()].filter(r => r !== start && Object.keys(r.nb).length === 1);
   const addLeaf = () => { // 막다른 방이 모자랄 때 한 칸 더 붙인다
-    const list = [...rooms.values()].filter(r => r !== start).sort(() => Math.random() - 0.5);
-    for (const base of list) for (const [, [dx, dy]] of entries.sort(() => Math.random() - 0.5)) {
+    const list = shuf([...rooms.values()].filter(r => r !== start));
+    for (const base of list) for (const [, [dx, dy]] of shuf(entries)) {
       const nx = base.x + dx, ny = base.y + dy;
       if (!rooms.has(key(nx, ny)) && occ(nx, ny) === 1) { add(nx, ny, "normal"); link(); return true; }
     }
     return false;
   };
-  const special = [...(f <= SPECIAL_ROOM_FLOORS ? ["boss", "treasure", "shop"] : ["boss"]), ...(forceSpecials || rollSpecials(f))];
+  const special = [...(f <= SPECIAL_ROOM_FLOORS ? ["boss", "treasure", "shop"] : ["boss"]), ...(forceSpecials || rollSpecials(f, rnd))];
   while (leaves().length < special.length && addLeaf());
   const ls = leaves().sort((a, b) => b.dist - a.dist);
   ls[0].type = "boss";
-  const rest = ls.slice(1).sort(() => Math.random() - 0.5);
+  const rest = shuf(ls.slice(1));
   special.slice(1).forEach((t, i) => { if (rest[i]) { rest[i].type = t; if (SPECIAL_ROOMS[t] && SPECIAL_ROOMS[t].locked) rest[i].locked = true; } });
   // 엘리트 방: 시작 방에서 2칸 이상 떨어진 일반 방 중에서
   const elites = f >= 4 ? 2 : 1;
@@ -91,22 +94,42 @@ function generateFloor(f, forceSpecials) {
     return true;
   };
   let bigCount = 0;
-  if (f >= 2) for (const r of [...rooms.values()].sort(() => Math.random() - 0.5)) {
+  if (f >= 2) for (const r of shuf([...rooms.values()])) {
     const isBoss = r.type === "boss" && f >= 3; // 보스 방도 가끔 큰 방 (L자는 제외: 가운데가 빈 칸이 되므로)
-    if (bigCount >= 2 || (r.type !== "normal" && !isBoss) || r.dist < 1 || Math.random() > (isBoss ? 0.4 : 0.3)) continue;
-    const roll = Math.random(), kind = isBoss ? (roll < 0.6 ? "two" : "four") : roll < 0.5 ? "two" : roll < 0.8 ? "ell" : "four";
-    const shape = [...SHAPES[kind]].sort(() => Math.random() - 0.5).find(sh => fits(r, sh));
+    if (bigCount >= 2 || (r.type !== "normal" && !isBoss) || r.dist < 1 || rnd() > (isBoss ? 0.4 : 0.3)) continue;
+    const roll = rnd(), kind = isBoss ? (roll < 0.6 ? "two" : "four") : roll < 0.5 ? "two" : roll < 0.8 ? "ell" : "four";
+    const shape = shuf(SHAPES[kind]).find(sh => fits(r, sh));
     if (!shape) continue;
     r.big = true; r.cells = [[0, 0], ...shape]; shape.forEach(([dx, dy]) => claimed.add(key(r.x + dx, r.y + dy))); bigCount++;
   }
-  const cands = [...rooms.values()].filter(r => r.type === "normal" && r.dist >= 2).sort(() => Math.random() - 0.5);
-  cands.slice(0, elites).forEach(r => { r.type = "elite"; });
+  const cands = [...rooms.values()].filter(r => r.type === "normal" && r.dist >= 2); const candsS = shuf(cands);
+  candsS.slice(0, elites).forEach(r => { r.type = "elite"; });
   // 2층부터 보물방·상점은 잠겨 있다: 열쇠 1개로 한 번 열면 계속 열려 있다 (1층은 그냥 들어간다). 열쇠가 모자라지 않게
   // 시작 방에서 가까운 일반 방 KEY_ROOMS개는 클리어하면 열쇠를 확정으로 준다 (그 밖에 방 클리어 보상·상자에서도 나온다).
+  for (const r of rooms.values()) r.tie = rnd();
   if (f >= LOCK_FROM_FLOOR) {
     for (const r of rooms.values()) if (r.type === "treasure" || r.type === "shop") r.locked = true;
-    [...rooms.values()].filter(r => r.type === "normal" && r.dist >= 1).sort((a, b) => a.dist - b.dist || Math.random() - 0.5).slice(0, KEY_ROOMS).forEach(r => { r.keyDrop = true; });
+    [...rooms.values()].filter(r => r.type === "normal" && r.dist >= 1).sort((a, b) => a.dist - b.dist || a.tie - b.tie).slice(0, KEY_ROOMS).forEach(r => { r.keyDrop = true; });
+  }
+  // 비밀방: 일반·엘리트 방의 벽 너머 막다른 방. 처음엔 숨겨져 있고(지도·문 없음) 폭발이나 강한 공격으로 벽을 부수면 문이 열린다. 2~7층에서 SECRET_CHANCE 확률로 최대 1개.
+  let secret = null;
+  if (f >= SECRET_MIN && f <= SECRET_MAX && rnd() < SECRET_CHANCE) {
+    const hosts = shuf([...rooms.values()].filter(r => r.type === "normal" || r.type === "elite"));
+    outer: for (const host of hosts) for (const [d, [dx, dy]] of shuf(entries)) {
+      const nx = host.x + dx, ny = host.y + dy; if (claimed.has(key(nx, ny))) continue;
+      let ok = true; for (const [, [ax, ay]] of entries) { const k2 = key(nx + ax, ny + ay); if (k2 !== key(host.x, host.y) && claimed.has(k2)) ok = false; }
+      if (!ok) continue;
+      secret = { x: nx, y: ny, type: "secret", visited: false, cleared: false, spawned: false, items: [], obs: null, big: false, cells: [[0, 0]], nb: {}, dist: host.dist + 1, hidden: true, host };
+      host.secret = secret; host.secretDir = d; claimed.add(key(nx, ny)); break outer;
+    }
   }
   start.cleared = true; start.spawned = true;
-  return { rooms, start, floor: f, list: [...rooms.values()] };
+  const list = [...rooms.values()]; list.forEach(r => { r.seed = (rnd() * 4294967296) >>> 0; }); if (secret) secret.seed = (rnd() * 4294967296) >>> 0; // 방마다 시드: 같은 시드 = 같은 방
+  return { rooms, start, floor: f, list, secret };
+}
+
+// 비밀방의 문을 연다 (폭발·강한 공격으로 벽을 부쉈을 때). 지도에 방이 나타나고 host 방에 문이 생긴다.
+function revealSecret(map, host) {
+  const s = host && host.secret; if (!s || !s.hidden) return false;
+  s.hidden = false; host.nb[host.secretDir] = s; s.nb[OPP[host.secretDir]] = host; map.rooms.set(s.x + "," + s.y, s); map.list.push(s); return true;
 }

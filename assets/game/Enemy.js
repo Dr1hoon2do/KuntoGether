@@ -565,7 +565,7 @@ class Enemy extends Component {
     const mv = this._mv; this.col.sync();
     Physics.moveCircle(p.x, p.y, this.radius, vx * dt, vy * dt, this.ai === "orbit" ? PL.Wall : PL.Solid, mv, this.col); // 벽·지형에 막히면 미끄러진다 (터널링 없음)
     const wallHit = mv.hit;
-    if (wallHit && mv.collider.bit === PL.Obstacle && (vx || vy)) { this.avoidT = 0.6; if (!this.avoidSign) this.avoidSign = Math.random() < 0.5 ? 1 : -1; } // 지형에 막히면 잠깐 옆으로 돌아간다
+    if (wallHit && (mv.collider.bit === PL.Obstacle || mv.collider.bit === PL.Pit) && (vx || vy)) { this.avoidT = 0.6; if (!this.avoidSign) this.avoidSign = Math.random() < 0.5 ? 1 : -1; } // 지형에 막히면 잠깐 옆으로 돌아간다
     this.transform.setPosition(mv.x, mv.y); this.col.sync();
     if (this.ai === "ricochet" && this.rv && wallHit) { // 튕기기: 부딪힌 면의 법선 쪽으로 방향을 바꾼다
       if (Math.abs(mv.nx) > 0.3) this.rv[0] = mv.nx > 0 ? Math.abs(this.rv[0]) : -Math.abs(this.rv[0]);
@@ -868,8 +868,8 @@ class Projectile extends Component {
       let hit = false;
       if (q.x > hw || q.x < -hw) { this.vx = -this.vx; t.setPosition(Math.max(-hw, Math.min(hw, q.x)), q.y); hit = true; }
       if (q.y > hh || q.y < -hh) { this.vy = -this.vy; t.setPosition(q.x, Math.max(-hh, Math.min(hh, q.y))); hit = true; }
-      if (hit) { this.bounces--; this.life = Math.max(this.life, 2.2); this.bx = null; this.homing = 0; }
-    } else if (!this.bm && (Math.abs(q.x) > hw + 10 || Math.abs(q.y) > hh + 10)) { if (this.area && this.fromPlayer) this._boom(); else this.gameObject.destroy(); return; }
+      if (hit) { if (this.fromPlayer) this.game.secretDamage(q.x, q.y, this.dmg, 26); this.bounces--; this.life = Math.max(this.life, 2.2); this.bx = null; this.homing = 0; }
+    } else if (!this.bm && (Math.abs(q.x) > hw + 10 || Math.abs(q.y) > hh + 10)) { if (this.fromPlayer) this.game.secretDamage(q.x, q.y, this.dmg, 26); if (this.area && this.fromPlayer) this._boom(); else this.gameObject.destroy(); return; } // (비밀방: 내 탄이 금간 벽에 닿으면 벽이 깨진다)
     // ---- 충돌: 이번 프레임 이동 구간(p → q)을 반지름 radius 원으로 쓸면서 판정한다 (고속 탄도 터널링 없음, 보이는 크기 = 맞는 크기) ----
     if (this.col) this.col.sync();
     const mvx = q.x - p.x, mvy = q.y - p.y;

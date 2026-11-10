@@ -262,6 +262,7 @@ class Hero extends Component {
     }
     buf = []; n = query(PL.Obstacle, buf);
     for (let k = 0; k < n; k++) { const o = buf[k].data; if (!o.destructible || o.dead) continue; o.damage(Math.max(1, Math.round(dmg / 2)), this, !!s.demolish); hit++; } // 상자·통은 부서진다 (바위는 폭발로만)
+    { const sp = g.secretPoint(); if (sp) { const dx = sp.x - p.x, dy = sp.y - p.y; if (Math.hypot(dx, dy) <= w.range + 14) { let da = Math.abs(Math.atan2(dy, dx) - dir); if (da > Math.PI) da = Math.PI * 2 - da; if (da <= ph + 0.35) g.secretDamage(sp.x, sp.y, dmg, 40); } } } // 비밀방: 금간 벽을 친다
     if (!isEcho) {
       this._extras(w, dir);
       for (let k = 1; k < (w.hits || 1); k++) this.echoes.push({ t: 0.1 * k, dir, w });
@@ -322,6 +323,7 @@ class Hero extends Component {
     for (let k = 0; k < n; k++) { const e = buf[k].data; if (e.dead || e.spawnDelay > 0) continue; e.damage(dmg, this, a, w.knock); this.applyHitEffects(e, dmg); }
     n = Physics.overlapCapsule(p.x, p.y, ex, ey, w.width / 2, PL.Obstacle, buf); // 직선 위의 상자·통
     for (let k = 0; k < n; k++) { const o = buf[k].data; if (o.destructible && !o.dead) o.damage(Math.max(1, Math.round(dmg / 2)), this, !!this.stats.demolish); }
+    { const sp = g.secretPoint(); if (sp) { const dx = ex - p.x, dy = ey - p.y, L2 = dx * dx + dy * dy || 1, tt = Math.max(0, Math.min(1, ((sp.x - p.x) * dx + (sp.y - p.y) * dy) / L2)); if (Math.hypot(p.x + dx * tt - sp.x, p.y + dy * tt - sp.y) <= 14 + w.width / 2) g.secretDamage(sp.x, sp.y, dmg, 40); } } // 광선이 금간 벽에 닿으면
     const go = g.App.create("laser"); go.transform.setPosition(p.x, p.y); go.transform.rotation = a; let t = 0;
     go.addComponent(new DrawRenderer(ctx => { ctx.globalAlpha = 1 - t / 0.12; ctx.strokeStyle = TIERS[this.weapon.tier].color; ctx.lineWidth = w.width * 0.7; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(w.range, 0); ctx.stroke(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(w.range, 0); ctx.stroke(); }, w.range + 10, { order: 8 }));
     go.addComponent(new (class extends Component { update(dt) { t += dt; if (t > 0.12) go.destroy(); } })());

@@ -16,30 +16,25 @@ const DEVIL_GOLD = 8, DEVIL_KEYS = 3;
 function devilChance(hits) { return Math.pow(0.5, Math.max(0, Math.floor(hits || 0))); }
 const GAMBLE_TABLE = [["nothing", 40], ["c3", 24], ["c5", 11], ["c10", 4], ["key", 8], ["heart", 6], ["boom", 5], ["item", 2]];  // [결과, 가중치]
 
+// 특수 방·상점·보물방의 배치도 타일맵 위에 만든다. 함수는 (G, room, R) — G.ownerView()는 문이 있는 칸의 지역 좌표(위쪽이 r=0), R은 시드 난수.
+//   가시 타일(T.SPIKE)은 걸어 다닐 수 있는 바닥이고, 가시 판의 동작·그림은 SpikeField가 맡는다. 제단(T.ALTAR)은 2x3 타일을 차지하고 지름 50의 원 하나가 된다.
+const AMBUSH_BASE = ["arenaRing", "pillarRing", "bunkers", "fortress", "quadrants", "doubleRing", "pillarGrid", "colonnade"];
 const SPECIAL_LAYOUT = {
-  // 가시방: 문 반대쪽에 보상, 그 사이에 가시 판 띠. 판은 칸을 가득 채워서 옆으로 돌아갈 수 없다
-  spike(L, room) {
-    const d = Object.keys(room.nb || {})[0] || "S", [vx, vy] = DIRV[d], vertical = vy !== 0, D = vertical ? CELL_H : CELL_W, across = vertical ? CELL_W : CELL_H;
-    const cols = Math.round(across / 30), tw = across / cols, rows = vertical ? 3 : 6, th = 30, t0 = 64;
-    const at = (t, u) => vertical ? [u, vy * (CELL_HY - t)] : [vx * (CELL_HX - t), u];
-    const tiles = [];
-    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-      const [x, y] = at(t0 + th * (r + 0.5), -across / 2 + (c + 0.5) * tw);
-      tiles.push({ x, y, hw: (vertical ? tw : th) / 2, hh: (vertical ? th : tw) / 2, ph: r * 0.62 + c * 0.11 + (r & 1 ? 0.3 : 0) });
-    }
-    L.spikes = tiles; const rt = vertical ? D - 38 : D - 70, spots = [];
-    for (const u of [-44, 0, 44]) { const [x, y] = at(rt, u); spots.push({ x, y }); }
-    L.spots = spots; L.checks.push({ x: spots[1].x, y: spots[1].y }); L.names.push("spike");
-    const [px, py] = at(rt + (vertical ? 4 : 10), 0); for (const u of [-110, 110]) { const [x, y] = at(rt, u); L.raw("pillar", x, y, 26, 26); }
+  treasure(G, room, R) { const V = G.ownerView(); for (const [c, r] of [[2, 1], [13, 1], [2, 7], [13, 7]]) if (R.chance(0.75)) V.set(c, r, T.PILLAR); },
+  shop(G, room, R) { const V = G.ownerView(); for (const [c, r] of [[1, 1], [14, 1], [1, 7], [14, 7]]) V.set(c, r, T.PILLAR); if (R.chance(0.5)) { V.set(3, 0, T.BARREL); V.set(12, 0, T.BARREL); } },
+  // 가시방: 문 반대쪽에 보상, 그 사이에 가시 판 띠 3줄. 띠는 방을 가득 가로질러서 옆으로 돌아갈 수 없다
+  spike(G, room, R) {
+    const d = Object.keys(room.nb || {})[0] || "S", m = G.map, ow = G.owner, spots = [];
+    if (d === "N" || d === "S") { const V = G.ownerView(false, d === "S"); V.rect(0, 3, 15, 5, T.SPIKE); V.set(2, 7, T.PILLAR); V.set(13, 7, T.PILLAR); for (const u of [-50, 0, 50]) spots.push({ x: ow.x + u, y: V.wy(7) }); }
+    else { const V = G.ownerView(d === "E", false); V.rect(5, 0, 7, 8, T.SPIKE); V.set(13, 1, T.PILLAR); V.set(13, 7, T.PILLAR); for (const u of [-50, 0, 50]) spots.push({ x: V.wx(13), y: ow.y + u }); }
+    G.spots = spots; G.checks.push([m.ti(spots[1].x), m.tj(spots[1].y)]);
   },
-  sacrifice(L) { L.raw("altar", 0, 0, 26, 26); for (const sx of [-1, 1]) for (const sy of [-1, 1]) L.add("pillar", sx * 135, sy * 62, 26, 26); L.names.push("sacrifice"); },
-  gamble(L) {
-    for (const x of [-72, 72]) L.raw("machine", x, 56, 30, 32); for (const x of [-140, 140]) { L.add("crate", x, -60, 22, 22); L.add("crate", x, -36, 22, 22); }
-    L.names.push("gamble");
-  },
-  ambush(L, room) { const t = [...CELL_TPL].filter(t => ["arenaGates", "arenaPinwheel", "pillarRing", "cornerBunkers", "mirrorCover", "centerFort", "pillars4"].includes(t.id)); const p = pickOne(t); L.frame(0, 0, Math.random() < 0.5 ? -1 : 1, Math.random() < 0.5 ? -1 : 1); p.fn(L); L.names.push("ambush:" + p.id); },
-  devil(L) { for (const sx of [-1, 1]) for (const sy of [-1, 1]) L.add("pillar", sx * 150, sy * 70, 26, 26); L.names.push("devil"); },
-  library(L) { L.add("wall", -100, 82, 100, 26); L.add("wall", 100, 82, 100, 26); L.add("pillar", -165, -70, 26, 26); L.add("pillar", 165, -70, 26, 26); L.names.push("library"); },
+  sacrifice(G, room, R) { const V = G.ownerView(); V.rect(7, 3, 8, 5, T.ALTAR); for (const [c, r] of [[3, 2], [12, 2], [3, 6], [12, 6]]) V.set(c, r, T.PILLAR); },
+  gamble(G, room, R) { const V = G.ownerView(); V.rect(4, 1, 4, 2, T.MACHINE); V.rect(11, 1, 11, 2, T.MACHINE); V.rect(1, 6, 1, 7, T.CRATE); V.rect(14, 6, 14, 7, T.CRATE); },
+  ambush(G, room, R) { const id = R.pick(AMBUSH_BASE), t = A_CELL.find(a => a.id === id); t.fn(G, G.ownerView(R.chance(0.5), R.chance(0.5)), R); },
+  devil(G, room, R) { const V = G.ownerView(); for (const [c, r] of [[3, 2], [12, 2], [3, 6], [12, 6]]) V.set(c, r, T.PILLAR); },
+  library(G, room, R) { const V = G.ownerView(); V.hline(1, 3, 6, T.WALL); V.hline(1, 9, 12, T.WALL); V.set(1, 7, T.PILLAR); V.set(14, 7, T.PILLAR); },
+  secret(G, room, R) { const V = G.ownerView(); for (const [c, r] of [[2, 2], [13, 2], [2, 6], [13, 6]]) V.set(c, r, T.PILLAR); },
 };
 
 class SpikeField extends Component {
@@ -83,7 +78,7 @@ class SacrificeCtl {
     const ap = a.transform.position;
     for (const h of this.g.heroes) {
       if (!h.alive) continue; const p = h.transform.position;
-      if (Math.hypot(p.x - ap.x, p.y - ap.y) <= 13 + h.radius + 3) { this.sacrifice(h, ap); break; }   // 제단(반지름 13)에 몸이 닿았을 때
+      if (Math.hypot(p.x - ap.x, p.y - ap.y) <= a.w / 2 + h.radius + 3) { this.sacrifice(h, ap); break; }   // 제단(반지름 w/2)에 몸이 닿았을 때
     }
   }
   sacrifice(h, ap) {
@@ -96,7 +91,7 @@ class SacrificeCtl {
     if (h.hp <= 0) h.die();                                                           // 앙크 같은 부활 효과가 있으면 Hero.die가 처리한다
   }
   reward(kind, n, ap) {
-    const g = this.g, np = g._np(), R = (i = 0) => { const a = n * 2.4 + i * 1.3, s = g._freeSpot(ap.x + Math.cos(a) * 36, ap.y + Math.sin(a) * 36, 12); return [s.x, s.y]; };
+    const g = this.g, np = g._np(), R = (i = 0) => { const a = n * 2.4 + i * 1.3, s = g._freeSpot(ap.x + Math.cos(a) * 56, ap.y + Math.sin(a) * 56, 12); return [s.x, s.y]; };
     const takenP = g._heldItems(), takenA = g._heldActives();
     switch (kind) {
       case "coins2": for (let i = 0; i < 2; i++) { const [x, y] = R(i); g.spawnCoin(x, y, g.rollCoinValue(0.1)); } break;
@@ -152,7 +147,7 @@ const Specials = {
   },
   // 보스 방을 클리어했을 때 부른다: 악마 상점 방을 만들고 보스 방에 포탈을 연다 (한 번 열리면 그 층 동안 계속 열려 있다)
   openDevil(game, boss) {
-    boss.devil = boss.devil || { type: "devil", x: boss.x, y: boss.y, visited: false, cleared: true, spawned: false, items: [], obs: null, big: false, cells: [[0, 0]], nb: { S: boss }, dist: boss.dist };
+    boss.devil = boss.devil || { type: "devil", seed: hash2(boss.seed || 1, 0xde711), x: boss.x, y: boss.y, visited: false, cleared: true, spawned: false, items: [], obs: null, big: false, cells: [[0, 0]], nb: { S: boss }, dist: boss.dist };
     boss.devilOpen = true; game._makePortal(); SFX.play("warn"); return boss.devil;
   },
   // 방에 처음 들어갔을 때 한 번: 내용물 채우기
@@ -178,6 +173,11 @@ const Specials = {
       for (let i = 0; i < an; i++) { const id = randomActiveId(takenA); takenA.add(id); items.push({ type: "active", id, state: null, hpPrice: 2 }); } // 액티브 2하트
       items.push({ type: "trade", give: { gold: DEVIL_GOLD }, stock: np, hpPrice: 1 }); items.push({ type: "trade", give: { keys: DEVIL_KEYS }, stock: 1, hpPrice: 1 });
       const pos = game._layout(items.length, 6); items.forEach((it, i) => game._makePickup({ ...it, price: 0, x: pos[i].x, y: pos[i].y }));
+    }
+    else if (t === "secret") { // 비밀방 보상: 아이템 하나, 아니면 코인·하트·열쇠 더미
+      room.cleared = true; const q = game._freeSpot(0, 0, 14);
+      if (Math.random() < 0.5) game._makePickup({ ...game._itemSlot(takenP, takenA, 0.15), price: 0, x: q.x, y: q.y });
+      else { for (let i = 0; i < 4; i++) { const s2 = game._dropSpot(40); game.spawnCoin(s2.x, s2.y, game.rollCoinValue(0.4)); } const h2 = game._dropSpot(40); game.spawnHeart(h2.x, h2.y); const k2 = game._dropSpot(40); game.spawnKey(k2.x, k2.y); }
     }
     else if (t === "ambush") { room.waves = 3; game._spawnWave(false, 1); }
     else if (t === "library") {
