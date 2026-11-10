@@ -45,8 +45,8 @@ class Game extends Component {
   }
 
   // ---------- 생성 도우미 ----------
-  spawnSlash(hero, dir, w) {
-    const go = this.App.create("slash"), p = hero.transform.position, color = w.color || TIERS[hero.weapon.tier].color;
+  spawnSlash(hero, dir, w, anchor) { // anchor: 휘두르는 위치를 따라갈 대상 (분신·아군·잔향). 기본은 hero 자신
+    const anc = anchor || hero.transform, go = this.App.create("slash"), p = anc.position, color = w.color || TIERS[hero.weapon.tier].color;
     go.transform.setPosition(p.x, p.y); go.transform.rotation = dir;
     let t = 0; const dur = w.dur, half = (w.arc * Math.PI / 180) / 2;
     go.addComponent(new DrawRenderer(ctx => {
@@ -63,7 +63,7 @@ class Game extends Component {
         ctx.globalAlpha = 1 - k * k; ctx.beginPath(); ctx.arc(0, 0, w.range, start, cur); ctx.stroke();
       }
     }, w.range + 10, { order: 8 }));
-    go.addComponent(new (class extends Component { update(dt) { t += dt; go.transform.setPosition(hero.transform.position.x, hero.transform.position.y); if (t > dur) go.destroy(); } })());
+    go.addComponent(new (class extends Component { update(dt) { t += dt; go.transform.setPosition(anc.position.x, anc.position.y); if (t > dur) go.destroy(); } })());
   }
   spawnProj(x, y, angle, speed, dmg, fromPlayer, opts) {
     if (!fromPlayer && this.projs.length >= BALANCE.maxEnemyProjectiles) return;
@@ -310,7 +310,7 @@ class Game extends Component {
     for (let i = 0; i < np; i++) this._makePickup({ ...this._itemSlot(takenP, takenA, 0.2), price: 0, x: pos[i].x, y: pos[i].y });
     for (let i = 0; i < np; i++) this.spawnWeaponPickup(pos[np + i].x, pos[np + i].y, randomWeapon(this.floorNum + 4));
   }
-  // 상점: (1~3) + 인원수x2 개의 품목. 하트(4G)가 나오면 인원수만큼 살 수 있다. 가격은 등급으로 고정(일반 10 / 희귀 15 / 영웅 20).
+  // 상점: (1~3) + 인원수x2 개의 품목. 하트(4G)가 나오면 인원수만큼 살 수 있다. 가격: 아이템 15G 고정.
   _stockShop(np) {
     const n = Math.min(30, 1 + Math.floor(Math.random() * 3) + np * 2 + 2 * this.partySum("shopExtra")), takenP = this._heldItems(), takenA = this._heldActives();
     const list = [];

@@ -1,6 +1,6 @@
 // ============================================================================
 // 패시브 아이템 / 액티브 아이템  (이벤트 훅 + 공격 수식 파이프라인)
-// 등급(tier) 3단계: 1=일반 2=희귀 3=영웅 (가격은 ITEM_TIERS). 새 아이템은 아래 P(...) 한 줄이면 보물방·상점·보스 보상에 자동으로 섞인다.
+// 아이템에는 등급 구분이 없다 (가격 15G 고정, 확률 균등). P()의 두 번째 인자는 형태 변환 우선순위 기본값. 새 아이템은 아래 P(...) 한 줄이면 보물방·상점·보스 보상에 자동으로 섞인다.
 //
 // ── 아이템 정의 형식  P(id, tier, 아이콘, 이름, 설명, [태그], 스펙)  ───────────────────────────────
 //   s      : 스탯 변경. { dmg: 0.1 } 더하기 / { "dmg*": 1.2 } 곱하기 / { pierce: true } 켜기      (스탯 목록은 newStats)
@@ -24,6 +24,14 @@
 //   재화   : coinPickup(값) · keyPickup · heartPickup · chestOpen   ← 주워 담는 쪽(Pickup 등)이 호출한다
 //   보유 스탯 중 coinLuck·chestLuck·rewardLuck(파티 합)은 보상 굴림에서 읽는 값이다.  game.gold(공유 골드)·game.keys(공유 열쇠, 없으면 0)
 //
+// ── 분신 · 조종 무기 · 장판 (ItemFx.js) ───────────────────────────────────────────────────────
+//   cloneAhead/cloneBehind/twin : 분신(Clone)이 내 공격을 자기 위치에서 따라한다(Hero._mimic) — 앞·뒤(반대 방향)·1초 전 위치
+//   relay : 가까운 아군이 내 공격을 자기 자리에서 따라한다      delayEcho n : n번째 공격마다 0.5초 뒤 같은 자리에서 한 번 더
+//   ludo 1/2 : 조종 구슬/검(Ludo) — 공격 스틱을 끄는 방향·세기로 날아간다      blades n : 몸 주위를 도는 칼날(Blades)
+//   spawnZone(g, 주인, x, y, {kind, r, life, tick, dmg}) : 바닥 장판(fire/poison/slow/spark/bomb), spawnTurret : 임시 포탑
+//   액티브 조작 함수: rerollItems(주사위) · replayRoom · warp · rerollPickups · convertPickups
+//   syncFx(h)는 giveItem 때마다 불려 스탯에 맞게 분신·칼날·조종 무기를 만들고 없앤다.  (끌어당기는 자석 효과는 없다 — 줍기는 몸이 닿아야 한다)
+//
 // ── 상태이상 (Enemy.addStatus) ─────────────────────────────────────────────────────────────────
 //   burn 화상 · chill 둔화 · freeze 빙결 · poison 중독 · shock 감전(근처 적에게 번개) · bleed 출혈(받는 피해 +25%)
 //   반응: 화상xN빙결/둔화=증기 폭발 · 화상x중독=독불 · 감전xN빙결/둔화=초전도.  → Enemy.js _react
@@ -45,11 +53,12 @@ const newStats = () => ({ speed: 1, atkSpeed: 1, dmg: 1, range: 1, knock: 1, das
   vsBurn: 0, vsFrozen: 0, vsBleed: 0, vsBoss: 0, vsElite: 0, vsFull: 0, far: 0, near: 0,
   // 유틸 · 협동 · [파티] 재화
   dashExtra: 0, roomShield: 0, mapSpecial: false, auraAtk: 0, auraDmg: 0, auraInv: 0, link: 0,
+  // 분신·조종 무기·칼날 · 공격 변형 · 조건부 피해 (ItemFx.js / Hero.js가 읽는다)
+  cloneAhead: 0, cloneBehind: 0, twin: 0, blades: 0, ludo: 0, relay: 0, delayEcho: 0, curve: 0, charge: 0, streakDmg: 0, roomRamp: 0, richDmg: 0, keyDmg: 0,
+  demolish: false, bulletTime: false, bulletSize: 1, noSlow: false, dashFirst: 0, alt: 0, trailWalk: false, pulse: false, quack: 0, starProc: 0, critBleed: false, teamDmg: 0,
   coinDouble: 0, interest: 0, crateGold: 0, firstHalf: false, shopExtra: 0, coinLuck: 0, chestLuck: 0, rewardLuck: 0 });
-const ITEM_TIERS = [null,
-  { name: "일반", price: 10, color: "#e8e8e8", weight: 5 },
-  { name: "희귀", price: 15, color: "#4fc3f7", weight: 3 },
-  { name: "영웅", price: 20, color: "#ce93d8", weight: 1.4 }];
+// 아이템(패시브·액티브)에는 등급이 없다: 가격 15G 고정, 나올 확률 모두 같음. (tier 숫자는 형태 변환 우선순위 기본값으로만 쓰인다)
+const ITEM_TIERS = [null, ...[1, 2, 3].map(() => ({ name: "", price: 15, color: "#e8e8e8", weight: 1 }))];
 
 // ---------------------------------------------------------------------------
 // 공통 도우미 (할당을 최소화: 모듈 안의 재사용 버퍼)
@@ -85,6 +94,7 @@ function itemsOnKill(g, by, e) {
     if (s.plague && e.poi) itemsAoe(g, p.x, p.y, 36, 0, by, ["#9ccc65", "#c5e1a5"], o => { if (o !== e) o.addStatus("poison", 1, by); });
     if (s.bloodHeal && e.bld && Math.random() < s.bloodHeal) by.heal(1);
     by.killT = 2;
+    const ac = by.active; if (ac) { const ad = ACTIVES[ac.id]; if (ad.kind === "kill" && ((ac.prog = (ac.prog || 0) + 1) >= ad.per)) { ac.prog = 0; ac.charge = Math.min(ad.max, ac.charge + 1); } } // 처치로 충전되는 액티브
     g.fire("kill", by, e);
   } finally { _kd--; }
 }
@@ -175,21 +185,23 @@ P("bubble", 1, "🫧", "보호막 거품", "방마다 한 번 맞아도 무효 (
 P("longbarrel", 1, "🔭", "긴 총신", "사거리 +30%, 공격 속도 -15%", ["ranged"], { s: { "range*": 1.3, "atkSpeed*": 0.85 } });
 P("shortfuse", 1, "🧵", "짧은 심지", "공격 속도 +30%, 사거리 -20%", ["speed"], { s: { "atkSpeed*": 1.3, "range*": 0.8 } });
 P("heavyboots", 1, "🥾", "무거운 군화", "이동 속도 -15%, 공격력 +20%, 넉백 +20%", ["melee"], { s: { "speed*": 0.85, "dmg*": 1.2, "knock*": 1.2 } });
-// ── 일반 꾸미기·잡동사니 (효과는 거의 없음) ──
-P("redhat", 1, "🧢", "빨간 모자", "그냥 모자다. 잘 어울린다", ["silly"], { cos: { hat: "#e53935" } });
-P("papercrown", 1, "👑", "종이 왕관", "머리 위에 왕관 (효과 없음)", ["silly"], { cos: { crown: "#ffd54f" } });
-P("sparkleshoes", 1, "👟", "반짝이 신발", "걸을 때마다 반짝이가 흩날린다", ["silly"], { cos: { sparkle: true } });
-P("rainbowaura", 1, "🌈", "무지개 후광", "몸 둘레가 무지개색으로 변한다", ["silly"], { cos: { aura: true } });
-P("squaretear", 1, "🟦", "네모난 눈물", "내 탄이 네모 모양이 된다", ["silly"], { cos: { shape: "square" } });
-P("startear", 1, "⭐", "별 눈물", "내 탄이 별 모양이 된다", ["silly"], { cos: { shape: "star" } });
-P("duckwhistle", 1, "🦆", "오리 호루라기", "공격할 때마다 딸랑 소리가 난다", ["silly"], { cos: { sfx: "coin" } });
-P("roundglasses", 1, "🤓", "동그란 안경", "똑똑해 보인다 (효과 없음)", ["silly"], { cos: { glasses: true } });
-P("mustache", 1, "🥸", "콧수염", "멋있다. 아무 일도 일어나지 않는다", ["silly"], { cos: { mustache: true } });
-P("mismatch", 1, "🧦", "짝짝이 양말", "공격력 +1%, 이동 속도 -1%", ["silly"], { s: { "dmg*": 1.01, "speed*": 0.99 } });
-P("pebble", 1, "🪨", "조약돌", "이동 속도 -2%, 넉백 +2%", ["silly"], { s: { "speed*": 0.98, "knock*": 1.02 } });
-P("dicebox", 1, "🎲", "주사위 상자", "방에 들어갈 때마다 공격력이 ±5% 무작위로 바뀐다", ["silly", "luck"], { on: { roomEnter: o => { o.rollDmg = 0.95 + Math.random() * 0.1; } } });
-P("soapbar", 1, "🧼", "비누", "적을 처치하면 비눗방울이 퐁", ["silly"], { on: { kill: (o, s, e) => { if (s === o) { const p = e.transform.position; o.game.fx.emit(p.x, p.y, { count: 5, colors: ["#b3e5fc", "#e1f5fe", "#fff"], speed: [8, 28], life: [0.5, 0.9], size: [2, 3.5], fade: true }); } } } });
-
+// ── 일반: 엉뚱한 소재지만 모두 게임에 영향을 준다 ──
+P("redhat", 1, "🧢", "빨간 두건", "공격 중에도 느려지지 않는다, 이동 속도 +8%", ["speed"], { s: { noSlow: true, "speed*": 1.08 }, cos: { hat: "#e53935" } });
+P("papercrown", 1, "👑", "종이 왕관", "팀 골드 10G마다 공격력 +4% (최대 +40%)", ["wealth"], { s: { richDmg: 0.004 }, cos: { crown: "#ffd54f" } });
+P("sparkleshoes", 1, "👟", "반짝이 신발", "걸은 자리에 반짝이 장판이 남아 닿은 적에게 피해", ["speed"], { s: { trailWalk: true }, cos: { sparkle: true } });
+P("squaretear", 1, "🟦", "네모난 눈물", "내 탄이 1.6배 커지고 넉백 +30%", ["ranged"], { s: { bulletSize: 0.6, "knock*": 1.3 }, cos: { shape: "square" } });
+P("startear", 1, "⭐", "별 눈물", "공격할 때 30% 확률로 별 3개가 부채꼴로 함께 나간다", ["luck"], { s: { starProc: 0.3 }, cos: { shape: "star" } });
+P("duckwhistle", 1, "🦆", "오리 호루라기", "공격할 때 6% 확률로 '꽥!' — 주변 적(보스 제외)이 0.9초 기절", ["utility"], { s: { quack: 0.06 }, cos: { sfx: "coin" } });
+P("mustache", 1, "🥸", "콧수염", "대시할 때 수염 바람이 주변 적을 밀어내고 피해를 준다", ["speed"], { cos: { mustache: true }, on: { dash: (o, s) => { if (s === o) { const p = o.transform.position; o.game.shockwave(p.x, p.y, 34, 3, 220, o); } } } });
+P("mismatch", 1, "🧦", "짝짝이 양말", "공격이 번갈아 나간다: 짝수 타는 공속 +30%, 홀수 타는 피해 +30%", ["speed"], { s: { alt: 0.3 } });
+P("pebble", 1, "🪨", "조약돌", "대시한 뒤 1.5초 안의 첫 공격 피해 ×2.5", ["speed"], { s: { dashFirst: 1.5 } });
+P("soapbar", 1, "🧼", "비누", "적이 죽은 자리에 3초간 미끄러운 거품 — 닿은 적이 느려진다", ["utility"], { on: { kill: (o, s, e) => { if (s === o) { const p = e.transform.position; spawnZone(o.game, o, p.x, p.y, { kind: "slow", r: 22, life: 3, tick: 0.3 }); } } } });
+P("dicebox", 1, "🎲", "주사위 상자", "방에 들어갈 때마다 무작위 버프: 공격력/공속/이속 +30% 또는 보호막 +1", ["luck"], { on: { roomEnter: o => { const r = Math.floor(Math.random() * 4); if (r === 0) o.addBuff(60, 0.3, 0, 0); else if (r === 1) o.addBuff(60, 0, 0.3, 0); else if (r === 2) o.addBuff(60, 0, 0, 0.3); else o.shield = Math.min(2, o.shield + 1); } } });
+P("roundglasses", 1, "🤓", "동그란 안경", "치명타 +12%, 근접 치명타가 적을 출혈시킨다", ["luck"], { s: { crit: 0.12, critBleed: true }, cos: { glasses: true } });
+P("keycutter", 1, "🗝️", "열쇠 칼날", "열쇠 1개당 공격력 +8% (최대 +40%)", ["wealth"], { s: { keyDmg: 0.08 } });
+P("patience", 1, "⏳", "인내심", "방에 오래 머물수록 공격력이 오른다 (30초에 최대 +50%)", ["utility"], { s: { roomRamp: 0.5 } });
+P("quickclock", 1, "⏱️", "속전속결 시계", "방에 들어가고 12초 안에 클리어하면 3G 코인이 떨어진다", ["wealth"], { on: { roomClear: o => { if (o.roomT < 12 && o.alive) { const q = o.game._dropSpot(); o.game.spawnCoin(q.x, q.y, 3); } } } });
+P("tinbell", 1, "🛎️", "양철 방울", "적을 처치하면 12% 확률로 그 자리에 폭탄이 놓인다", ["explosive"], { on: { kill: (o, s, e) => { if (s === o && Math.random() < 0.12) { const p = e.transform.position; o.game.spawnBomb(p.x, p.y, o); } } } });
 // ================= 희귀 =================
 P("hotonion", 2, "🌶️", "개매운 양파", "공격력 +10%, HP 2 회복", ["blood"], { s: { "dmg*": 1.10 }, heal: 2 });
 P("rottenmush", 2, "🍄", "썩은 버섯", "최대 HP -1, 공격 속도 ×1.3", ["dark"], { hp: -1, s: { "atkSpeed*": 1.3 } });
@@ -255,10 +267,24 @@ P("starbug", 2, "🐞", "별벌레", "주변을 돌며 가까운 적에게 작�
 P("shieldbug", 2, "🪲", "방패 딱정벌레", "주변을 돌며 닿는 적 탄을 막아 준다", ["familiar", "defense"], { fam: "shieldbug" });
 P("flamesprite", 2, "🔥", "불꽃 정령", "따라다니며 닿는 적에게 화상", ["familiar", "fire"], { fam: "flamesprite" });
 P("babyghost", 2, "👻", "아기 유령", "넓게 돌며 닿는 적에게 피해", ["familiar", "dark"], { fam: "babyghost" });
-// ── 희귀 꾸미기 ──
-P("fartcushion", 2, "💨", "방귀 쿠션", "대시할 때 뿌잉 하고 연기가 난다 (효과 없음)", ["silly"], { on: { dash: (o, s) => { if (s === o) { const p = o.transform.position; o.game.fx.emit(p.x, p.y, { count: 6, colors: ["#aed581", "#dcedc8"], speed: [10, 30], life: [0.3, 0.6], size: [2, 3.5], fade: true }); SFX.play("swap"); } } } });
-P("confetti", 2, "🎊", "폭죽 통", "HP가 가득일 때 적을 처치하면 색종이가 흩날린다", ["silly"], { on: { kill: (o, s, e) => { if (s === o && o.hp >= o.maxHp) { const p = e.transform.position; o.game.fx.emit(p.x, p.y, { count: 14, colors: ["#ef5350", "#ffee58", "#66bb6a", "#42a5f5", "#ab47bc"], speed: [30, 90], life: [0.4, 0.8], size: [1, 2], fade: true }); } } } });
-
+// ── 희귀: 엉뚱하지만 게임에 영향을 주는 것 ──
+P("rainbowaura", 2, "🌈", "무지개 후광", "6초마다 주변 적에게 무작위 상태이상(화상·둔화·감전·중독·출혈)", ["utility"], { s: { pulse: true }, cos: { aura: true } });
+P("fartcushion", 2, "💨", "방귀 쿠션", "대시할 때 지나간 자리에 독가스 구름이 3초간 남는다", ["poison"], { on: { dash: (o, s) => { if (s === o) { const p = o.transform.position; for (let k = 0; k < 2; k++) spawnZone(o.game, o, p.x + Math.cos(o.dashDir) * 18 * k, p.y + Math.sin(o.dashDir) * 18 * k, { kind: "poison", r: 16, life: 3, tick: 0.4, dmg: 0.5 * o.stats.dmg }); } } } });
+P("confetti", 2, "🎊", "폭죽 통", "HP가 가득일 때 적을 처치하면 폭죽이 터져 주변에 피해", ["explosive"], { on: { kill: (o, s, e) => { if (s === o && o.hp >= o.maxHp) { const p = e.transform.position; itemsAoe(o.game, p.x, p.y, 30, 3 * o.stats.dmg, o, ["#ef5350", "#ffee58", "#66bb6a", "#42a5f5"]); } } } });
+// ── 희귀: 분신·조종·반복 공격 ──
+P("mirrorself", 2, "🪞", "거울 분신", "뒤에 분신이 생겨 내 공격을 반대 방향으로 따라한다 (피해 60%)", ["clone"], { s: { cloneBehind: 1 } });
+P("shadowtwin", 2, "👥", "그림자 쌍둥이", "1초 전 내 위치를 따라다니는 분신이 같은 방향으로 공격을 따라한다 (피해 60%)", ["clone", "dark"], { s: { twin: 1 } });
+P("delayecho", 2, "🔔", "잔향의 종", "3번째 공격마다 0.5초 뒤 같은 자리에서 한 번 더 울린다 (피해 70%)", ["clone"], { s: { delayEcho: 3 } });
+P("spinblades", 2, "🌀", "회전 칼날", "몸 주위를 도는 칼날 2개 — 닿은 적에게 피해, 적 탄도 쳐낸다", ["melee", "defense"], { s: { blades: 2 } });
+P("curveshot", 2, "↪️", "휘는 탄", "내 탄이 이동하는 방향으로 휘어진다 (이동 스틱으로 조종)", ["ranged"], { s: { curve: 1 } });
+P("chargeglove", 2, "🔋", "충전 장갑", "공격을 멈추고 있으면 충전된다 — 1.3초 쉬면 다음 공격 피해 ×2.5", ["luck"], { s: { charge: 1.5 } });
+P("turretbox", 2, "🧰", "포탑 상자", "적을 10마리 처치할 때마다 그 자리에 10초간 자동 포탑이 선다", ["explosive", "utility"], { on: { kill: (o, s, e) => { if (s === o && ++o.killN % 10 === 0) { const p = e.transform.position; spawnTurret(o.game, o, p.x, p.y, 10); } } } });
+P("streak", 2, "🏅", "무결점 행진", "안 맞고 처치할수록 공격력 +3% (최대 +50%), 맞으면 초기화", ["luck"], { s: { streakDmg: 0.03 }, on: { kill: (o, s) => { if (s === o) o.streak++; }, damaged: (o, s) => { if (s === o) o.streak = 0; } } });
+P("demolish", 2, "🔨", "철거반 망치", "근접·레이저가 바위도 부순다 (원래는 폭발만 가능)", ["melee", "utility"], { s: { demolish: true } });
+P("bullettime", 2, "⌛", "위기의 집중", "HP가 3분의 1 이하면 모든 적이 절반 속도로 움직인다", ["defense"], { s: { bulletTime: true } });
+P("lingerfire", 2, "🕯️", "불씨 장판", "공격이 20% 확률로 맞은 자리에 2.5초간 타는 장판을 남긴다", ["fire"], { on: { hit: (o, s, e) => { if (s === o && Math.random() < 0.2) { const p = e.transform.position; spawnZone(o.game, o, p.x, p.y, { kind: "fire", r: 15, life: 2.5, tick: 0.4, dmg: 0.4 * o.stats.dmg }); } } } });
+P("slotgrip", 2, "🎰", "슬롯 손잡이", "방을 클리어하면 25% 확률로 코인·열쇠·꾸러미·하트 중 하나가 더 떨어진다", ["wealth", "luck"], { on: { roomClear: o => { const g = o.game; if (o !== g.heroes[0] || Math.random() > 0.25 + 0.05 * (g.heroes.length - 1)) return; const q = g._dropSpot(), r = Math.random(); if (r < 0.4) g.spawnCoin(q.x, q.y, 5); else if (r < 0.65) g.spawnKey(q.x, q.y); else if (r < 0.85) g.spawnBundle(q.x, q.y); else g.spawnHeart(q.x, q.y); } } });
+P("teamoath", 2, "🤝", "희생의 서약", "[파티] 모두 공격력 +12%, 나는 최대 HP -1", ["coop"], { hp: -1, s: { teamDmg: 0.12 } });
 // ================= 영웅 =================
 P("redonion", 3, "🧅", "적양파", "공격력 +25%, HP 3 회복", ["blood"], { s: { "dmg*": 1.25 }, heal: 3 });
 P("rainbowmush", 3, "🍄", "알록달록 버섯", "최대 HP +1, 공격력 ×1.3, 이동 +15%, 공격속도 +0.15, 사거리 +5%", ["luck"], { hp: 1, s: { "dmg*": 1.3, "speed*": 1.15, atkSpeed: 0.15, "range*": 1.05 } });
@@ -291,6 +317,12 @@ P("bossslayer", 3, "🗿", "보스 사냥꾼", "보스에게 피해 +30%", ["dar
 P("linkthread", 3, "🧶", "연결의 실", "가까운 아군과 실로 이어져, 실에 닿은 적이 피해를 입는다", ["coop", "electric"], { s: { link: 1 } });
 P("mentorseal", 3, "🏵️", "사부의 인장", "가까운 아군(75 이내)의 공격력 +12%", ["coop", "holy"], { s: { auraDmg: 0.12 } });
 P("fairy", 3, "🧚", "요정", "따라다니며 방을 3번 클리어할 때마다 가장 아픈 아군을 치유", ["familiar", "holy", "coop"], { fam: "fairy", on: { roomClear: (o, s, room) => { o.fairyN = (o.fairyN || 0) + 1; if (o.fairyN % 3 === 0) { const a = lowestAlly(o.game, null); if (a && a.hp < a.maxHp) { a.heal(1); o.game.puff(a, ["#f8bbd0", "#fff"]); } } } } });
+
+// ── 영웅: 분신·조종·릴레이 ──
+P("phantom", 3, "👻", "분신 인형", "내 앞에 분신이 서서 내 공격을 그 자리에서 따라한다 (피해 60%)", ["clone", "dark"], { s: { cloneAhead: 1 } });
+P("ludoorb", 3, "🔮", "조종 구슬", "공격 스틱을 끄는 방향·세기로 구슬이 날아가 닿는 적을 벤다 (스틱을 놓으면 몸 주위를 돈다)", ["ranged", "luck"], { s: { ludo: 1 } });
+P("ludoblade", 3, "🗡️", "유령 검", "공격 스틱을 끄는 대로 움직이는 검 — 닿는 적에게 큰 피해, 적 탄도 쳐낸다", ["melee", "dark"], { s: { ludo: 2 } });
+P("relay", 3, "🏃", "릴레이 배턴", "[파티] 가까운 아군(150 이내)이 내 공격을 자기 자리에서 따라한다 (피해 40%)", ["coop", "clone"], { s: { relay: 1 } });
 
 for (const it of Object.values(PASSIVES)) it.price = ITEM_TIERS[it.tier].price;
 const ITEMS = PASSIVES; // (예전 이름)
@@ -352,6 +384,8 @@ class Familiar extends Component {
 // 액티브 아이템: 한 명당 1개. 새로 얻으면 들고 있던 것은 바닥에 떨어진다.
 //   kind "charge"  : 방을 클리어하면 충전 1 (큰 방은 2). max까지 모인다.  use 한 번에 충전 1 소모
 //   kind "cooldown": 쿨타임(cd초)이 지나면 다시 쓸 수 있다.
+//   kind "kill"    : 적을 per마리 처치할 때마다 충전 1 (최대 max)       kind "dmg": 피해를 per만큼 줄 때마다 충전 1 (최대 max)
+//   kind "floor"   : 층이 시작될 때 max회로 채워진다 (그 층에서 max번 쓸 수 있다)
 //   use(hero, game) → true면 사용됨 (false면 소모 안 함)
 // ============================================================================
 const ACTIVES = {
@@ -390,11 +424,52 @@ const ACTIVES = {
                  const dir = tgt ? Math.atan2(tgt.y - p.y, tgt.x - p.x) : h.facing; let n = 0;
                  for (const pr of g.projs) { if (pr.fromPlayer || pr.gameObject.isDestroyed || pr.orbit) continue; pr.owner = h; pr.reflect(h, dir); n++; }
                  g.cam.shake(2, 0.2); SFX.play("clear"); return n > 0; } },
+  // ── 주사위 · 방/아이템 조작 ──
+  d1:        { tier: 1, icon: "🎲", name: "작은 주사위", kind: "charge", max: 2, desc: "가장 가까운 바닥 아이템 하나를 다른 것으로 바꾼다",
+               use(h, g) { if (!rerollNearest(h, g)) return false; g.puff(h, ["#ce93d8", "#fff"]); SFX.play("item"); return true; } },
+  d6:        { tier: 2, icon: "🎲", name: "D6", kind: "charge", max: 3, desc: "가진 패시브를 모두 무작위 다른 아이템으로 바꾼다",
+               use(h, g) { if (!rerollItems(h)) return false; g.puff(h, ["#ce93d8", "#fff"]); g.cam.shake(2, 0.2); SFX.play("item"); return true; } },
+  tarot:     { tier: 1, icon: "🃏", name: "점쟁이 카드", kind: "cooldown", cd: 25, desc: "바닥(상점 포함)의 아이템·무기를 다시 뽑는다",
+               use(h, g) { return rerollPickups(g); } },
+  alchemy:   { tier: 2, icon: "⚗️", name: "연금술 가루", kind: "charge", max: 3, desc: "바닥의 동전→열쇠→하트→동전으로 바꾼다",
+               use(h, g) { return convertPickups(g); } },
+  exchange:  { tier: 1, icon: "💱", name: "환전소", kind: "cooldown", cd: 10, desc: "6G를 열쇠 1개로 (골드가 모자라면 열쇠 1개를 4G로)",
+               use(h, g) { if (g.gold >= 6) { g.gold -= 6; g.addKey(1); } else if (g.keys > 0) { g.keys--; g.gold += 4; } else return false; g.puff(h, ["#ffe082", "#fff"]); SFX.play("coin"); return true; } },
+  roulette:  { tier: 1, icon: "🎡", name: "룰렛", kind: "charge", max: 3, desc: "무작위: 회복·골드·열쇠·무적·적 전체 피해 … 가끔 HP -1",
+               use(h, g) { const r = Math.floor(Math.random() * 7); g.puff(h, ["#ffee58", "#fff"]); SFX.play("item");
+                 if (r === 0) h.heal(2); else if (r === 1) g.addGold(10); else if (r === 2) g.addKey(2); else if (r === 3) h.invuln = Math.max(h.invuln, 4);
+                 else if (r === 4) { for (const e of g.enemies) if (!e.dead && e.spawnDelay <= 0) e.damage(5 * h.stats.dmg, h, -Math.PI / 2, 30); } else if (r === 5) g.spawnBomb(h.transform.position.x, h.transform.position.y, h);
+                 else if (h.hp > 1) { h.hp--; h.draw.flash = 0.1; } return true; } },
+  // ── 이동 · 방 다시 돌기 ──
+  scroll:    { tier: 2, icon: "📜", name: "텔레포트 두루마리", kind: "cooldown", cd: 35, desc: "보스방을 뺀 무작위 방으로 순간이동",
+               use(h, g) { return warp(g, "random"); } },
+  recall:    { tier: 1, icon: "🪨", name: "귀환석", kind: "floor", max: 1, desc: "시작 방으로 돌아간다 (층마다 1회)",
+               use(h, g) { return warp(g, "start"); } },
+  replay:    { tier: 3, icon: "⏪", name: "되감기 시계", kind: "charge", max: 2, desc: "클리어한 일반·엘리트 방을 한 번 더 — 적이 다시 나오고 보상도 다시 (방마다 1회)",
+               use(h, g) { return replayRoom(g); } },
+  // ── 소환 · 협동 ──
+  clonecall: { tier: 2, icon: "🧍", name: "분신 소환", kind: "charge", max: 3, desc: "10초간 옆에서 내 공격을 따라하는 분신을 부른다",
+               use(h, g) { spawnTempClone(g, h, 10); g.puff(h, ["#b39ddb", "#fff"]); SFX.play("swap"); return true; } },
+  turretitem: { tier: 2, icon: "🗼", name: "포탑 설치", kind: "charge", max: 3, desc: "10초간 가까운 적을 쏘는 자동 포탑을 세운다",
+               use(h, g) { const p = h.transform.position; spawnTurret(g, h, p.x + Math.cos(h.facing) * 14, p.y + Math.sin(h.facing) * 14, 10); SFX.play("swap"); return true; } },
+  lifebell:  { tier: 3, icon: "🛎️", name: "부활의 종", kind: "charge", max: 6, desc: "쓰러진 아군 한 명을 HP 절반으로 되살린다",
+               use(h, g) { const d = g.heroes.find(o => !o.alive); if (!d) return false; const p = h.transform.position; d.transform.setPosition(p.x + 12, p.y); d.revive(Math.ceil(d.maxHp / 2)); g.puff(d, ["#fff59d", "#fff"]); SFX.play("clear"); return true; } },
+  transfusion: { tier: 2, icon: "💉", name: "수혈", kind: "cooldown", cd: 12, desc: "내 HP 1을 가장 아픈 아군에게 준다 (내 HP 2 이상일 때)",
+               use(h, g) { const a = lowestAlly(g, h); if (!a || a.hp >= a.maxHp || h.hp < 2) return false; h.hp--; a.heal(1); g.puff(a, ["#ef5350", "#fff"]); SFX.play("swap"); return true; } },
+  // ── 공격 ──
+  voodoo:    { tier: 2, icon: "🪆", name: "저주 인형", kind: "charge", max: 4, desc: "모든 적에게 저주: 큰 피해 + 출혈 + 중독",
+               use(h, g) { let n = 0; for (const e of g.enemies) { if (e.dead || e.spawnDelay > 0) continue; n++; const ep = e.transform.position; e.damage(4 * h.stats.dmg, h, -Math.PI / 2, 20); e.addStatus("bleed", 1, h); e.addStatus("poison", 1, h); g.fx.emit(ep.x, ep.y, { count: 4, colors: ["#7b1fa2", "#ce93d8"], speed: [10, 40], life: [0.2, 0.4], size: [1, 2], fade: true }); } SFX.play("warn"); return n > 0; } },
+  vengeance: { tier: 2, icon: "🗡️", name: "복수의 칼날", kind: "kill", per: 12, max: 3, desc: "사방으로 관통 칼날 12발",
+               use(h, g) { const p = h.transform.position; for (let k = 0; k < 12; k++) g.spawnProj(p.x, p.y, k * Math.PI / 6, 210, 2.5 * h.stats.dmg, true, { owner: h, pierce: true, life: 0.9, radius: 3, knock: 60, color: "#ef9a9a" }); SFX.play("boom"); return true; } },
+  rage:      { tier: 3, icon: "💢", name: "분노 게이지", kind: "dmg", per: 90, max: 2, desc: "8초간 공격력 +70%, 공격 속도 +20%, 이동 +30%",
+               use(h, g) { h.addBuff(8, 0.7, 0.2, 0.3); g.puff(h, ["#ff5252", "#fff"]); SFX.play("warn"); return true; } },
 };
 for (const it of Object.values(ACTIVES)) it.price = ITEM_TIERS[it.tier].price;
-const activeLabel = a => a ? `${ACTIVES[a.id].icon}${ACTIVES[a.id].name} ${ACTIVES[a.id].kind === "charge" ? `${a.charge}/${ACTIVES[a.id].max}` : a.cdLeft > 0 ? Math.ceil(a.cdLeft) + "초" : "준비"}` : "";
+const CHARGED = { charge: 1, kill: 1, dmg: 1, floor: 1 }; // 충전 횟수로 쓰는 종류 (cooldown만 시간으로 쓴다)
+const activeNote = def => def.kind === "charge" ? `방 클리어마다 충전 (최대 ${def.max})` : def.kind === "kill" ? `적 ${def.per}마리 처치마다 충전 (최대 ${def.max})` : def.kind === "dmg" ? `피해 ${def.per}마다 충전 (최대 ${def.max})` : def.kind === "floor" ? `층마다 ${def.max}회` : `쿨타임 ${def.cd}초`;
+const activeLabel = a => a ? `${ACTIVES[a.id].icon}${ACTIVES[a.id].name} ${CHARGED[ACTIVES[a.id].kind] ? `${a.charge}/${ACTIVES[a.id].max}` : a.cdLeft > 0 ? Math.ceil(a.cdLeft) + "초" : "준비"}` : "";
 
-// 등급이 높을수록 덜 나온다. exclude: 이미 뽑은 id 집합 (모자라면 중복 허용)
+// 모든 아이템 확률 균등. exclude: 이미 뽑은 id 집합 (모자라면 중복 허용)
 const randomItemId = (exclude = new Set()) => {
   let ids = Object.keys(PASSIVES).filter(id => !exclude.has(id));
   if (!ids.length) ids = Object.keys(PASSIVES);
