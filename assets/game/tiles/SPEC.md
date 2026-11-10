@@ -1,0 +1,70 @@
+# 타일맵 방 콘텐츠 규약
+
+방 한 칸 = **16×9 타일**. 큰 방은 칸을 이어 붙인다 (2칸 32×9 / 9×… 세로 2칸 16×18 / L자 3칸 / 2×2 칸 32×18). 좌표는 `(x, y)`, **y=0이 맨 위(화면 위쪽)**, 문자열 행 `rows[y][x]`.
+
+## 타일 문자
+| 문자 | 뜻 |
+|---|---|
+| `.` | 바닥 (걸을 수 있음) |
+| `#` | 벽 (부서지지 않음, 탄도 막음) |
+| `P` | 기둥 (부서지지 않음, 탄을 막음. 모양만 `#`과 다름) |
+| `R` | 바위 (폭발로만 부서짐) |
+| `C` | 상자 (아무 공격으로 부서짐, 코인/열쇠 가끔) |
+| `B` | 폭발 통 (부서지면 폭발, 연쇄) |
+| `V` | 구덩이 (걷지 못함, 탄은 통과) |
+| `S` | 가시 바닥 (걸을 수 있지만 주기적으로 피해) — 가시방 전용 |
+| `a` | 희생 제단 (희생방 전용, 방당 1개) |
+| `m` | 도박 기계 (도박방 전용) |
+| `p` | 아이템 받침대 (보상/상점 품목이 놓일 자리) |
+| `k` | 금 간 벽 (비밀방 입구가 있는 벽 — 비밀방 호스트에서 생성기가 지정, 콘텐츠는 쓰지 않음) |
+
+콘텐츠(archetype/stamp)는 위 문자만 쓴다. 문(`D`)과 바깥 테두리 벽은 **생성기가** 그린다.
+
+## 좌표 약속 (ctx)
+`build(ctx)`에 넘어가는 `ctx`:
+- `ctx.w, ctx.h` — 방 전체 타일 크기 (예: 16×9, 32×9, 32×18)
+- `ctx.play = { x0, y0, w, h }` — **채워도 되는 안쪽 영역** (바깥 테두리 1칸 제외). archetype은 이 영역 안에만 쓴다.
+- `ctx.cells = [{ cx, cy }]` — 이 방을 이루는 16×9 칸들의 칸 좌표 (왼쪽 위가 0,0). 칸 경계(칸 사이 통로)는 `ctx.links = [{ x, y, axis: "h"|"v" }]`로 알려 줌 — 통로 타일 + 양옆을 막으면 안 된다.
+- `ctx.doors = [{ side: "N"|"S"|"E"|"W", x, y }]` — 문이 있는 타일 위치. 문 바로 안쪽 2칸 폭×2칸 깊이는 `ctx.reserved(x,y)`가 true → 비워 둔다.
+- `ctx.reserved(x, y)` → bool : 비워 둬야 하는 곳 (문 앞, 칸 사이 통로, 플레이어 시작, 보스 등장 자리). 생성기가 최종적으로도 이 영역의 장애물을 지우므로 어겨도 깨지지는 않지만, 모양이 망가지니 피할 것.
+- `ctx.rng()` → [0,1) 시드 난수, `ctx.int(a, b)` → a..b 정수 (둘 다 포함), `ctx.pick(arr)`, `ctx.chance(p)`. **Math.random 금지** (시드 재현 때문).
+- `ctx.floor` (1~8), `ctx.players` (1~), `ctx.kind` (방 종류), `ctx.shape` (`"1x1"|"2x1"|"1x2"|"L"|"2x2"`).
+- `ctx.grid()` — 빈 방 `rows` 배열(문자 2차원 배열, 전부 `.`, 테두리 `#`)을 만들어 줌. 편의 도구: `ctx.fillRect(g,x,y,w,h,ch)`, `ctx.line(g,x0,y0,x1,y1,ch)`, `ctx.ring(g,x,y,w,h,ch)`, `ctx.mirrorH(g)` (좌우 대칭 복사), `ctx.mirrorV(g)` (상하 대칭 복사), `ctx.stamp(g, stampRows, x, y)`.
+- 회전은 하지 않는다 (16×9는 정사각이 아님). 좌우/상하 반전은 생성기가 마지막에 무작위로 적용한다 (문 위치도 같이 뒤집힘) — 비대칭 배치를 써도 된다.
+
+## Archetype (A: 방의 큰 구성)
+```js
+TileContent.registerArchetype({
+  id: "ring", kinds: ["normal", "elite"],          // normal|elite|boss|start|treasure|shop|sacrifice|spike|gamble|ambush|library|devil|secret
+  shapes: ["1x1"],                                 // 1x1 | 2x1 | 1x2 | L | 2x2
+  floors: [1, 8], weight: 1,
+  tags: ["cover", "arena"],                        // 자유 태그
+  stampSets: ["cover", "crates"],                  // B에서 가져올 수 있는 스탬프 세트 (생성기가 빈 곳에 놓음). 비우면 B 없음
+  stampCount: [0, 3],                              // B를 몇 개 놓을지 범위 (생성기가 놓을 수 있는 만큼만)
+  build(ctx) { const g = ctx.grid(); /* ... */ return { rows: g, zones: [{ x, y, w, h, weight }], slots: { pedestals: [[x,y]], altar: [x,y] } }; },
+});
+```
+- `rows` : 위 문자로 채운 2차원 배열 (`rows[y][x]`), 크기 `ctx.h × ctx.w` (테두리 포함 전체).
+- `zones` : **적 등장 구역** (타일 사각형, weight 가중치). 비우면 빈 곳 전체. 상자 밭, 아레나 중앙처럼 "의도"를 나타낸다.
+- `slots` : 특수방 전용 자리 정보 (받침대 `p` 위치 등). 문자로도 표시하므로 선택.
+- 생성 결과는 생성기가 **흐름 검사(문↔문, 칸 연결, 보스 자리, 시작 자리, 적 구역 도달)**를 해서 막히면 버린다. 콘텐츠는 가능한 한 막히지 않게 만들되, 일부러 좁은 길(미로 등)도 괜찮다 — 통로 폭은 **최소 2칸**(플레이어는 1칸 미만이지만 보스 마진을 위해), 보스방은 **3칸** 이상.
+
+## Stamp (B: 작은 구성 조각)
+```js
+TileContent.registerStamp({
+  id: "crate-pile-3x2", set: "crates", rows: ["CC.", "CCC"],  // '.'은 "건드리지 않음"이 아니라 "바닥으로 둔다"
+  tags: ["crates"], weight: 1, floors: [1, 8],
+  anchor: "any",        // any | center | edge(벽 옆) | corner | free(주변 1칸 빈 곳)
+  mirror: true,
+});
+```
+- 크기는 대개 1×1 ~ 5×4 정도. 생성기가 `play` 안의 빈 곳(예약 구역과 겹치지 않고 주변 통로를 막지 않는 곳)에 놓고, 놓을 때마다 흐름을 다시 검사한다.
+
+## 파일
+- `Registry.js` — 레지스트리 (이 규약의 코드). 
+- `ArchetypesNormal.js` — 일반/엘리트/시작 방 A
+- `ArchetypesBoss.js` — 보스방 A (1칸·큰 보스방 모두)
+- `ArchetypesSpecial.js` — 보물/상점/희생/가시/도박/매복/서재/악마/비밀 방 A
+- `Stamps.js` — 모든 B 스탬프
+- (생성기) `TileGen.js`, `TileMap.js` 등 — TILEMAP 담당이 만든다
+각 콘텐츠 파일은 `TileContent.registerArchetype/registerStamp`만 호출하고 순수 JS여야 한다 (브라우저 DOM·게임 객체 참조 금지) → Node 단위 테스트가 가능하다.
