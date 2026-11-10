@@ -790,7 +790,7 @@ class Projectile extends Component {
     this.area = opts.area || 0; this.orbit = opts.orbit || null; this.speed = opts.speed || speed;
     this.bm = opts.boomerang ? { phase: "out", dist: 0, max: opts.range || 80 } : null;
     this.bounces = opts.bounces || 0; this.homing = opts.homing || 0; this.wave = opts.wave || null; this.age = 0; this.bx = null; this.by = null;
-    this.split = opts.split || 0; this.shape = opts.shape || ""; this.needle = !!opts.needle; this._ht = 0; this._tg = null; // 아이템: 쪼개짐 · 탄 모양(꾸미기) · 바늘 · 유도 대상
+    this.split = opts.split || 0; this.shape = opts.shape || ""; this.needle = !!opts.needle; this.steer = opts.steer || 0; this._ht = 0; this._tg = null; // 아이템: 쪼개짐 · 탄 모양(꾸미기) · 바늘 · 유도 대상
     if (opts.skip) this.hitSet.add(opts.skip);
   }
   setup() {
@@ -850,6 +850,10 @@ class Projectile extends Component {
           for (const e of g.enemies) { if (e.dead || e.spawnDelay > 0 || this.hitSet.has(e)) continue; const ep = e.transform.position, d = (ep.x - p.x) * (ep.x - p.x) + (ep.y - p.y) * (ep.y - p.y); if (d < bd) { bd = d; this._tg = e; } }
         }
         if (this._tg) { const tp = this._tg.transform.position, sp = Math.hypot(this.vx, this.vy), cur = Math.atan2(this.vy, this.vx), want = Math.atan2(tp.y - p.y, tp.x - p.x), df = Math.atan2(Math.sin(want - cur), Math.cos(want - cur)), na = cur + Math.max(-3.2 * dt, Math.min(3.2 * dt, df)); this.vx = Math.cos(na) * sp; this.vy = Math.sin(na) * sp; this.angle = na; }
+      }
+      if (this.steer && this.fromPlayer && this.owner && this.owner.alive) { // 휘는 탄: 주인이 움직이는 방향으로 휘어진다
+        const i = this.owner.input;
+        if (i.mx * i.mx + i.my * i.my > 0.09) { const sp = Math.hypot(this.vx, this.vy), cur = Math.atan2(this.vy, this.vx), want = Math.atan2(i.my, i.mx), df = Math.atan2(Math.sin(want - cur), Math.cos(want - cur)), na = cur + Math.max(-2.6 * dt, Math.min(2.6 * dt, df)); this.vx = Math.cos(na) * sp; this.vy = Math.sin(na) * sp; this.angle = na; }
       }
       if (this.wave) { // 물결: 진행 방향의 수직으로 흔들리며 간다
         if (this.bx === null) { this.bx = p.x; this.by = p.y; this._pa = this.age; }

@@ -1,7 +1,7 @@
 const PICK_R = 11; // 안내 고리 반지름 = 상호작용 거리 (그려진 대로)
 // 코인 모양: 값 → [반지름, 색, 테두리, 안쪽 무늬]  (1 구리 / 3 은 / 5 금 / 10 파랑)
 const COIN_STYLE = { 1: [3, "#b87333", "#e0a070", "#8a5424"], 3: [3.8, "#cfd8dc", "#ffffff", "#90a4ae"], 5: [4.6, "#ffca28", "#fff8c4", "#c79100"], 10: [5.5, "#4fc3f7", "#e1f5fe", "#0288d1"] };
-// 바닥 아이템. type: coin(닿으면 골드, 자석) / key(닿으면 열쇠) / bundle(닿으면 터져서 코인·열쇠·하트) / chest(열쇠가 있으면 닿아서 열림) / heart(price 0이면 닿으면 회복) / weapon·item·상점 하트(가까이 가면 정보만 보이고, 공격(터치)하면 획득·교체·구매)
+// 바닥 아이템. type: coin(닿으면 골드) / key(닿으면 열쇠) / bundle(닿으면 터져서 코인·열쇠·하트) / chest(열쇠가 있으면 닿아서 열림) / heart(price 0이면 닿으면 회복) / weapon·item·상점 하트(가까이 가면 정보만 보이고, 공격(터치)하면 획득·교체·구매)
 class Pickup extends Component {
   constructor(game, item) {
     super();
@@ -102,7 +102,7 @@ class Pickup extends Component {
         this._label(ctx, def.name, -14, "#fff", 5.5);
         this._label(ctx, `${isAct ? "액티브 · " : ""}${ITEM_TIERS[def.tier].name}`, -20.5, color, 4.4);
         if (this.near) this._label(ctx, def.desc, -27, "#cfd8dc", 4.6);
-        if (this.near && isAct) this._label(ctx, def.kind === "charge" ? `방 클리어마다 충전 (최대 ${def.max})` : `쿨타임 ${def.cd}초`, -32, "#90a4ae", 4.2);
+        if (this.near && isAct) this._label(ctx, activeNote(def), -32, "#90a4ae", 4.2);
       } else {
         const w = WEAPONS[it.weapon.id], t = TIERS[it.weapon.tier];
         this._label(ctx, w.name, -bob, color, 7);
@@ -122,11 +122,7 @@ class Pickup extends Component {
     const g = this.game, it = this.item, p = this.transform.position;
     let near = null, nd = Infinity;
     for (const h of g.heroes) { if (!h.alive) continue; const hp = h.transform.position, d = Math.hypot(hp.x - p.x, hp.y - p.y); if (d < nd) { nd = d; near = h; } }
-    if (it.type === "coin" || it.type === "key") { // 가까우면 끌려간다
-      if (near && nd < 42) { const a = Math.atan2(near.transform.position.y - p.y, near.transform.position.x - p.x), s = 90 * dt; this.transform.setPosition(p.x + Math.cos(a) * s, p.y + Math.sin(a) * s); }
-      // 코인 획득은 트리거(onTriggerEnter)로: 코인 모양과 플레이어 몸이 실제로 닿았을 때
-      return;
-    }
+    if (it.type === "coin" || it.type === "key") return; // 코인·열쇠는 끌려오지 않는다. 몸이 실제로 닿았을 때(트리거) 줍는다
     if (this.touch) return; // 하트·꾸러미·상자도 트리거(onTriggerStay)로
     // 무기·패시브·상점 하트: 가까이 가면 정보만 표시. 획득·구매는 공격(터치)할 때 Game.tryInteract → interact()
     this.near = near && nd < PICK_R + near.radius ? near : null; // 흰 고리(반지름 11)에 몸이 닿으면 "공격 = 획득"
@@ -145,7 +141,7 @@ class Pickup extends Component {
     if (it.type === "active") { // 액티브: 들고 있던 것은 바닥에 떨어진다 (충전 상태 유지)
       const old = h.active; h.setActive(it.id, it.state);
       
-      if (old) { g._makePickup({ type: "active", id: old.id, state: { charge: old.charge, cdLeft: old.cdLeft }, price: 0, x: p.x, y: p.y - 14, lock: 1.5 }); }
+      if (old) { g._makePickup({ type: "active", id: old.id, state: { charge: old.charge, cdLeft: old.cdLeft, prog: old.prog }, price: 0, x: p.x, y: p.y - 14, lock: 1.5 }); }
       this.gameObject.destroy(); return true;
     }
     if (it.type === "item") { h.giveItem(it.id);  this.gameObject.destroy(); return true; }

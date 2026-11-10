@@ -22,6 +22,7 @@ class Hero extends Component {
     if (this.fams) this.clearFamiliars(); this.fams = [];
     this.hooks = {}; this.convs = []; this.convTo = {}; this.cos = {}; this.tagN = {}; this.sets = {}; this.syn = {};
     this.shield = 0; this.buff = { t: 0, dmg: 0, atk: 0, spd: 0 }; this.dashCharge = 1; this.comboN = 0; this.comboT = 0; this.killT = 0; this.hurtT = 0; this.rollDmg = 1; this.fairyN = 0;
+    if (typeof clearFx === "function") clearFx(this); this.clones = []; this.bladeFx = null; this.ludoFx = null; this.idleT = 0; this.streak = 0; this.swingN = 0; this.atkN = 0; this.killN = 0; this.dashFirstT = 0; this.trailT = 0; this.pulseT = 3; this.btT = 0; this._floorN = -1;
     this.allyAtk = 0; this.allyDmg = 0; this.allyInv = 0; this.linkTo = null; this.linkT = 0; this.auraT = 0; this.sparkT = 0; this._aw = null; this._awT = 0;
   }
   setup() {
@@ -42,7 +43,15 @@ class Hero extends Component {
     if (s.lowHp && this.hp <= 1) dmg *= 1 + s.lowHp;                   // 마지막 숨
     if (this.buff.t > 0) dmg *= 1 + this.buff.dmg;                     // 액티브 버프
     if (this.allyDmg) dmg *= 1 + this.allyDmg;                         // 아군 오라
-    if (this.rollDmg !== 1) dmg *= this.rollDmg;                       // 주사위 상자
+    if (this.rollDmg !== 1) dmg *= this.rollDmg;
+    if (s.charge) dmg *= 1 + s.charge * Math.min(1, this.idleT / 1.3);   // 충전 장갑: 쉬었다 치면 강하다
+    if (s.streakDmg) dmg *= 1 + Math.min(0.5, s.streakDmg * this.streak);  // 무결점 행진: 안 맞고 처치할수록
+    if (s.roomRamp) dmg *= 1 + s.roomRamp * Math.min(1, this.roomT / 30);   // 인내심: 방에 오래 있을수록
+    if (s.richDmg) dmg *= 1 + Math.min(0.4, s.richDmg * this.game.gold);    // 종이 왕관: 골드가 많을수록
+    if (s.keyDmg) dmg *= 1 + Math.min(0.4, s.keyDmg * this.game.keys);      // 열쇠 칼날: 열쇠가 많을수록
+    if (this.dashFirstT > 0 && s.dashFirst) dmg *= 1 + s.dashFirst;          // 조약돌: 대시 직후 첫 타
+    { const td = this.game.partySum("teamDmg"); if (td) dmg *= 1 + td; }     // 희생의 서약(파티)
+    if (s.alt) { if (this.swingN & 1) dmg *= 1 + s.alt; }                    // 짝짝이 양말: 홀수 타 강타
     let spd = s.atkSpeed;
     if (s.moveAtk && this.moving) spd *= 1 + s.moveAtk;               // 운동화: 이동 중
     if (s.dashAtk && now - this.dashAt < 2000) spd *= 1 + s.dashAtk;  // 빨간 리본: 대시 직후
@@ -51,6 +60,7 @@ class Hero extends Component {
     if (s.killAtk && this.killT > 0) spd *= 1 + s.killAtk;            // 연쇄 살육
     if (s.hurtBuff && this.hurtT > 0) spd *= 1 + s.hurtBuff;          // 아드레날린
     if (s.lowHp && this.hp <= 1) spd *= 1 + s.lowHp * 0.5;
+    if (s.alt && !(this.swingN & 1)) spd *= 1 + s.alt;                       // 짝수 타는 빠르게
     if (this.buff.t > 0) spd *= 1 + this.buff.atk;
     if (this.allyAtk) spd *= 1 + this.allyAtk;                         // 응원봉
     w.arc = w.ranged ? w.arc : Math.min(360, (w.arc || 0) * (1 + s.arcMul)); // 쪼개진 막대: 근접 범위
@@ -61,7 +71,11 @@ class Hero extends Component {
   get gold() { return this.game.gold; }            // 골드는 팀 전체가 공유한다
   set gold(v) { this.game.gold = v; }
   addGold(n) { return this.game.addGold(n); }
-  giveItem(id) { this.items.push(id); PASSIVES[id].apply(this); this._aw = null; }
+  giveItem(id) { this.items.push(id); PASSIVES[id].apply(this); this._aw = null; if (typeof syncFx === "function" && this.gameObject) syncFx(this); }
+  clearItems() { // 아이템 효과를 모두 걷어낸다 (주사위로 다시 뽑을 때). 체력 기본값은 난이도에 따른다
+    const php = this.game.diffProfile().playerHp; this.items = []; this.stats = newStats(); this.maxHp = php; this.hp = Math.min(this.hp, php);
+    this.hooks = {}; this.convs = []; this.convTo = {}; this.cos = {}; this.tagN = {}; this.sets = {}; this.syn = {}; this.clearFamiliars(); this.shield = 0; this._aw = null;
+  }
   on(evt, fn) { (this.hooks[evt] || (this.hooks[evt] = [])).push(fn); }   // 훅 등록 (Items.js의 on)
   fire(evt, a, b) { this.game.fire(evt, this, a, b); }                    // 이 플레이어가 일으킨 이벤트
   rebuildConv() { // 형태 변환 선택: 같은 형태를 바꾸는 변환이 여럿이면 우선순위(prio)가 높은 것, 같으면 나중에 얻은 것
@@ -97,13 +111,14 @@ class Hero extends Component {
     if (s.far || s.near) { const p = this.transform.position, ep = e.transform.position, d = Math.hypot(ep.x - p.x, ep.y - p.y); if (s.far && d > 70) m += s.far; if (s.near && d < 30) m += s.near; }
     return n * m;
   }
-  setActive(id, state) { this.active = { id, charge: state ? state.charge : 0, cdLeft: state ? state.cdLeft : 0 }; }
+  setActive(id, state) { const d = ACTIVES[id]; this.active = { id, charge: state ? state.charge : (d.kind === "floor" ? d.max : 0), cdLeft: state ? state.cdLeft : 0, prog: state ? state.prog || 0 : 0 }; }
   useActive() {
     const a = this.active; if (!a) return;
     const def = ACTIVES[a.id], g = this.game;
-    if (def.kind === "charge" ? a.charge <= 0 : a.cdLeft > 0) { if (!this._actDenied || this._actDenied < performance.now()) { SFX.play("block"); this._actDenied = performance.now() + 400; } return; }
+    if (CHARGED[def.kind] ? a.charge <= 0 : a.cdLeft > 0) { if (!this._actDenied || this._actDenied < performance.now()) { SFX.play("block"); this._actDenied = performance.now() + 400; } return; }
     if (!def.use(this, g)) return;
-    if (def.kind === "charge") a.charge--; else a.cdLeft = def.cd;
+    if (CHARGED[def.kind]) a.charge--; else a.cdLeft = def.cd;
+    this.fire("active", a.id);
   }
 
   _draw(ctx, r) {
@@ -122,6 +137,7 @@ class Hero extends Component {
       if (c.crown) { ctx.fillStyle = c.crown; ctx.beginPath(); ctx.moveTo(-4, 4.5); ctx.lineTo(-4, 9); ctx.lineTo(-2, 7); ctx.lineTo(0, 9.5); ctx.lineTo(2, 7); ctx.lineTo(4, 9); ctx.lineTo(4, 4.5); ctx.closePath(); ctx.fill(); }
       if (c.glasses) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.arc(-2.4, 1.2, 1.9, 0, 7); ctx.moveTo(4.3, 1.2); ctx.arc(2.4, 1.2, 1.9, 0, 7); ctx.moveTo(-0.5, 1.2); ctx.lineTo(0.5, 1.2); ctx.stroke(); }
       if (c.mustache) { ctx.strokeStyle = "#3e2723"; ctx.lineWidth = 1.3; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(-3.6, -1.6); ctx.quadraticCurveTo(-1.8, -0.2, 0, -1.6); ctx.quadraticCurveTo(1.8, -0.2, 3.6, -1.6); ctx.stroke(); }
+      if (this.stats.charge && this.idleT > 0.15) { ctx.strokeStyle = this.idleT >= 1.3 ? "#fff59d" : "#ffffffaa"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(0, 0, this.radius + 2.4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, this.idleT / 1.3)); ctx.stroke(); } // 충전 장갑: 충전 진행 고리
       if (this.shield > 0) { ctx.strokeStyle = "#80deea"; ctx.globalAlpha = 0.8; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(0, 0, this.radius + 3.6, 0, 7); ctx.stroke(); ctx.globalAlpha = 1; }
     } else { ctx.fillStyle = this.color; ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(0, 0, 6, 0, 7); ctx.fill(); ctx.globalAlpha = 0.6; }
     ctx.save(); ctx.scale(1, -1); ctx.fillStyle = this.alive ? "#fff" : "#aaa"; ctx.font = "bold 5.5px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
@@ -132,6 +148,7 @@ class Hero extends Component {
     if (!this.alive) return;
     const g = this.game, i = this.input, t = this.transform, s = this.stats;
     this.invuln -= dt; this.cd -= dt; this.moveT -= dt; this.roomT += dt;
+    this.dashFirstT -= dt; if (!i.atk && !this.swing) this.idleT += dt; fxTick(this, dt);
     this.hurtT -= dt; this.killT -= dt; if (this.buff.t > 0) this.buff.t -= dt; if (this.comboN && (this.comboT -= dt) <= 0) this.comboN = 0;
     this.auraT -= dt; if (this.auraT <= 0) { this.auraT = 0.2; this._auraTick(); }
     const dmax = 1 + s.dashExtra; this.dashCharge = Math.min(dmax, this.dashCharge + dt / (0.7 * s.dashCd)); this.dashCd = this.dashCharge >= 1 ? 0 : (1 - this.dashCharge) * 0.7 * s.dashCd; // 대시 충전(여분 대시 아이템이 있으면 여러 번)
@@ -150,7 +167,7 @@ class Hero extends Component {
     } else if (ml > 0.15) this.facing = Math.atan2(my, mx);
 
     if (i.dash && !this.prevDash && this.dashCharge >= 1 && this.dashT <= 0) { // 대시: 짧은 무적
-      this.dashT = 0.16; this.dashCharge -= 1; this.dashCd = (1 - this.dashCharge) * 0.7 * s.dashCd; this.invuln = Math.max(this.invuln, 0.2 + s.dashInvuln); this.dashAt = performance.now(); this.dashHit = new Set();
+      this.dashT = 0.16; this.dashCharge -= 1; this.dashCd = (1 - this.dashCharge) * 0.7 * s.dashCd; this.invuln = Math.max(this.invuln, 0.2 + s.dashInvuln); this.dashAt = performance.now(); this.dashHit = new Set(); if (s.dashFirst) this.dashFirstT = 1.5;
       this.dashDir = ml > 0.15 ? Math.atan2(my, mx) : this.facing;
       g.fx.emit(t.position.x, t.position.y, { count: 6, colors: [this.color, "#fff"], speed: [10, 40], life: [0.15, 0.3], size: [1, 2], fade: true });
       this.fire("dash");
@@ -182,7 +199,7 @@ class Hero extends Component {
     }
     for (let k = this.echoes.length - 1; k >= 0; k--) { // 연타·메아리 칼날의 추가 타격
       const e = this.echoes[k]; e.t -= dt;
-      if (e.t <= 0) { this.echoes.splice(k, 1); if (!e.w.ranged) g.spawnSlash(this, e.dir, e.w); this._strike(e.dir, e.w, true); }
+      if (e.t <= 0) { this.echoes.splice(k, 1); this._org = e.org || null; if (!e.w.ranged) g.spawnSlash(this, e.dir, e.w, e.org ? { position: e.org } : null); this._strike(e.dir, e.w, true); this._org = null; }
     }
     if (this.swing) { this.swing.t -= dt; if (this.swing.t <= 0) { const sw = this.swing; this.swing = null; this._strike(sw.dir, sw.w, false); } }
     else if (i.atk && this.cd <= 0 && this.dashT <= 0) this._startSwing();
@@ -199,8 +216,8 @@ class Hero extends Component {
     else { const a = this._autoAim(w); if (a !== null) dir = a; } // 자동 조준
     this.facing = dir;
     if (g.tryInteract(this)) { this.cd = 0.35; return; } // 아이템 앞에서 공격하면 획득·구매 (휘두르지는 않음)
-    this.cd = w.cd; this.swing = { t: w.delay, dir, w };
-    this.moveT = w.delay + (w.dur || 0.1); this.moveMul = w.move ?? 0.85;
+    this.cd = w.cd; this.swing = { t: w.delay, dir, w }; this.swingN++; this.idleT = 0; if (this.dashFirstT > 0) this.dashFirstT = 0;
+    this.moveT = w.delay + (w.dur || 0.1); this.moveMul = this.stats.noSlow ? 1 : (w.move ?? 0.85);
     if (!w.ranged) { g.spawnSlash(this, dir, w); SFX.play(this.cos.sfx || "swing"); }
     this.fire("swing", w, dir);
   }
@@ -217,11 +234,13 @@ class Hero extends Component {
     if (s.chain > 0) itemsArc(g, e, this, s.chain + (this.sets.electric ? 1 : 0), dmg * 0.5); // 번개가 튄다
     if (s.leech > 0) { this.leechN++; if (this.leechN >= 15 / s.leech) { this.leechN = 0; this.heal(1); } }
     if (s.combo) { this.comboN = Math.min(10, this.comboN + 1); this.comboT = 3; }
+    const a = this.active; if (a) { const d = ACTIVES[a.id]; if (d.kind === "dmg") { a.prog = (a.prog || 0) + dmg; if (a.prog >= d.per) { const k = Math.floor(a.prog / d.per); a.prog -= k * d.per; a.charge = Math.min(d.max, a.charge + k); } } } // 피해로 충전되는 액티브
     this.fire("hit", e, dmg);
   }
   _strike(dir, w, isEcho) {
-    if (w.ranged) return this._fire(dir, w, isEcho);
-    const g = this.game, p = this.transform.position, s = this.stats;
+    if (w.ranged) { if (!isEcho) this._onAttack(dir, w); return this._fire(dir, w, isEcho); }
+    const g = this.game, p = this._org || this.transform.position, s = this.stats;
+    if (!isEcho) this._onAttack(dir, w);
     const crit = Math.random() < s.crit, dmg = w.dmg * (crit ? 2 + s.critDmg : 1), half = (w.arc * Math.PI / 180) / 2;
     if (crit && s.critReset) this.cd = 0; // 신속의 반지
     // 판정은 그려진 궤적과 같은 모양: 부채꼴(apex=내 위치, 반지름 range, 반각 half) / 찌르기는 굵은 선(캡슐) — Physics가 몸 모양과 정확히 교차 판정
@@ -232,7 +251,7 @@ class Hero extends Component {
     for (let k = 0; k < n; k++) {
       const e = buf[k].data; if (e.dead || e.spawnDelay > 0) continue;
       const ep = e.transform.position;
-      e.damage(dmg, this, Math.atan2(ep.y - p.y, ep.x - p.x), w.knock); this.applyHitEffects(e, dmg); hit++;
+      e.damage(dmg, this, Math.atan2(ep.y - p.y, ep.x - p.x), w.knock); this.applyHitEffects(e, dmg); if (crit && s.critBleed) e.addStatus("bleed", 1, this); hit++;
     }
     buf = []; n = query(PL.EProj, buf);
     for (let k = 0; k < n; k++) { // 근접 공격은 기본으로 범위 안의 적 탄을 지운다. 반사 거울이 있으면 되받아친다(근접 공격에만 적용)
@@ -242,13 +261,28 @@ class Hero extends Component {
       else { g.fx.emit(pp.x, pp.y, { count: 4, colors: ["#fff", "#ff8a65"], speed: [20, 50], life: [0.15, 0.3], size: [1, 1.6], fade: true }); pr.gameObject.destroy(); SFX.play("block"); }
     }
     buf = []; n = query(PL.Obstacle, buf);
-    for (let k = 0; k < n; k++) { const o = buf[k].data; if (!o.destructible || o.dead) continue; o.damage(Math.max(1, Math.round(dmg / 2)), this, false); hit++; } // 상자·통은 부서진다 (바위는 폭발로만)
+    for (let k = 0; k < n; k++) { const o = buf[k].data; if (!o.destructible || o.dead) continue; o.damage(Math.max(1, Math.round(dmg / 2)), this, !!s.demolish); hit++; } // 상자·통은 부서진다 (바위는 폭발로만)
     if (!isEcho) {
       this._extras(w, dir);
       for (let k = 1; k < (w.hits || 1); k++) this.echoes.push({ t: 0.1 * k, dir, w });
       if (Math.random() < s.doubleSwing) this.echoes.push({ t: 0.16, dir, w });
     } else if (this.syn.echoWave) this._extras(w, dir); // 메아리 검기(짝 시너지)
     if (hit) g.cam.shake(w.knock > 150 ? 2.5 : 1.2, 0.1);
+  }
+  // 공격이 시작될 때마다 (분신·잔향·릴레이·별·오리 호루라기) — 분신/아군이 대신 치는 공격(isEcho)에서는 부르지 않는다
+  _onAttack(dir, w) {
+    const s = this.stats, g = this.game, p = this._org || this.transform.position;
+    if (this.clones.length) this._mimic(dir, w, 0.6, null);
+    if (s.relay) for (const o of g.heroes) { if (o === this || !o.alive) continue; const q = o.transform.position; if ((q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y) < 150 * 150) this._mimicAt(q, o.transform, dir, w, 0.4); }
+    if (s.delayEcho && ++this.atkN % s.delayEcho === 0) this.echoes.push({ t: 0.5, dir, w: Object.assign({}, w, { dmg: w.dmg * 0.7, hits: 1 }), org: { x: p.x, y: p.y } });
+    if (s.starProc && Math.random() < s.starProc) for (let k = -1; k <= 1; k++) g.spawnProj(p.x, p.y, dir + k * 0.3, 210, w.dmg * 0.4, true, Object.assign({ owner: this, life: 0.7, radius: 2.4, color: "#ffd54f", shape: "star", knock: 30 }, this._mods()));
+    if (s.quack && Math.random() < s.quack) { g.shockwave(p.x, p.y, 62, 0, 90, this); const m = Physics.overlapCircle(p.x, p.y, 62, PL.Enemy, _fb); for (let i = 0; i < m; i++) { const e = _fb[i].data; if (!e.dead && !e.boss) { e.stunT = 0.9; e._cancelBusy(); } } }
+  }
+  _mimic(dir, w, mul) { for (const c of this.clones) { if (c.gameObject.isDestroyed) continue; this._mimicAt(c.transform.position, c.transform, c.mode === "behind" ? dir + Math.PI : dir, w, c.mode === "side" ? 0.8 : mul); } }
+  _mimicAt(pos, anchor, dir, w, mul) { // pos에서 같은 공격을 mul 배 피해로 한 번 더 (재귀 없음: isEcho)
+    const w2 = Object.assign({}, w, { dmg: w.dmg * mul, hits: 1 }); this._org = pos;
+    if (!w.ranged) this.game.spawnSlash(this, dir, w2, anchor);
+    this._strike(dir, w2, true); this._org = null;
   }
   // 내 탄에 붙는 아이템 개조(튕김·유도·분열·모양)
   _mods() { const s = this.stats; return { bounces: s.bounce, homing: s.homing, split: s.split, shape: this.cos.shape || "" }; }
@@ -259,7 +293,7 @@ class Hero extends Component {
   }
   // 원거리 무기 발사
   _fire(dir, w, isEcho) {
-    const g = this.game, p = this.transform.position, s = this.stats;
+    const g = this.game, p = this._org || this.transform.position, s = this.stats;
     const crit = Math.random() < s.crit, dmg = w.dmg * (crit ? 2 + s.critDmg : 1);
     if (crit && s.critReset) this.cd = 0;
     const n = (w.count || 1) + s.extraShots, spread = w.arc ? w.arc * Math.PI / 180 : 0.2 * (n - 1);
@@ -277,17 +311,17 @@ class Hero extends Component {
     const spd = w.speed || 220, boom = w.kind === "boomerang" || (s.boomerang && w.kind !== "orb"), mods = this._mods();
     for (const a of angs) g.spawnProj(p.x, p.y, a, spd, dmg, true, {
       owner: this, knock: w.knock, kind: w.kind, color: TIERS[this.weapon.tier].color,
-      pierce: w.kind === "pierce" || boom || !!s.pierce, life: w.range / spd * (boom ? 3 : 1), radius: w.kind === "orb" ? 4.5 : 2.6,
+      pierce: w.kind === "pierce" || boom || !!s.pierce, life: w.range / spd * (boom ? 3 : 1), radius: (w.kind === "orb" ? 4.5 : 2.6) * s.bulletSize, steer: s.curve,
       area: w.kind === "orb" ? (w.area || 24) * s.range : 0, boomerang: boom, range: w.range, speed: spd, bounces: mods.bounces, homing: mods.homing, split: mods.split, shape: mods.shape });
     if (!isEcho && s.eProj > 0 && w.form === "projectile") this._laser(dir, { range: w.range, width: 4, knock: 20 }, dmg * 0.5 * s.eProj); // 광선 분할기: 즉시 광선이 함께 나간다
   }
   _laser(a, w, dmg) { // 즉시 직선 공격
-    const g = this.game, p = this.transform.position, cs = Math.cos(a), sn = Math.sin(a);
+    const g = this.game, p = this._org || this.transform.position, cs = Math.cos(a), sn = Math.sin(a);
     const ex = p.x + cs * w.range, ey = p.y + sn * w.range, buf = [];
     let n = Physics.overlapCapsule(p.x, p.y, ex, ey, w.width / 2, PL.Enemy, buf); // 그려진 굵은 선 그대로
     for (let k = 0; k < n; k++) { const e = buf[k].data; if (e.dead || e.spawnDelay > 0) continue; e.damage(dmg, this, a, w.knock); this.applyHitEffects(e, dmg); }
     n = Physics.overlapCapsule(p.x, p.y, ex, ey, w.width / 2, PL.Obstacle, buf); // 직선 위의 상자·통
-    for (let k = 0; k < n; k++) { const o = buf[k].data; if (o.destructible && !o.dead) o.damage(Math.max(1, Math.round(dmg / 2)), this, false); }
+    for (let k = 0; k < n; k++) { const o = buf[k].data; if (o.destructible && !o.dead) o.damage(Math.max(1, Math.round(dmg / 2)), this, !!this.stats.demolish); }
     const go = g.App.create("laser"); go.transform.setPosition(p.x, p.y); go.transform.rotation = a; let t = 0;
     go.addComponent(new DrawRenderer(ctx => { ctx.globalAlpha = 1 - t / 0.12; ctx.strokeStyle = TIERS[this.weapon.tier].color; ctx.lineWidth = w.width * 0.7; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(w.range, 0); ctx.stroke(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(w.range, 0); ctx.stroke(); }, w.range + 10, { order: 8 }));
     go.addComponent(new (class extends Component { update(dt) { t += dt; if (t > 0.12) go.destroy(); } })());
