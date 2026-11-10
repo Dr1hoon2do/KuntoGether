@@ -167,9 +167,9 @@ function validate(G) {
   return { ok: true, reach: soft, ratio: open };
 }
 
-function pickArchetype(kind, shape, floor, rng, place) {
-  let list = TileContent.archetypesFor(kind, shape, floor); if (!list.length) list = TileContent.archetypes.filter(a => a.kinds.includes(kind) && a.shapes.includes(shape)); if (!list.length) list = TileContent.archetypes.filter(a => a.id === "ph-open");
-  return rng.weighted(list, a => a.weight) || null;
+function pickArchetype(kind, shape, floor, rng) {
+  let list = TileContent.archetypesFor(kind, shape, floor); if (!list.length) list = TileContent.archetypes.filter(a => a.kinds.includes(kind) && a.shapes.includes(shape)); // 층 범위 밖이어도 같은 종류·모양이면
+  return list.length ? rng.weighted(list, a => a.weight) : null;                      // 없으면 null → 빈 방 (테두리·문만)
 }
 // 비대칭 섞기: 스탬프까지 놓은 뒤, 부서지는 작은 지형(상자·바위·통·기둥)을 몇 개 지우고 몇 개 새로 놓는다. 새로 놓을 때마다 흐름을 다시 검사해 막히면 되돌린다.
 // 거울 대칭(콘텐츠가 만든 대칭, 뒤집기로 생긴 대칭)이 한눈에 티 나지 않게 하려는 가벼운 손질이다.
@@ -205,6 +205,16 @@ function breakSymmetry(G, rng) {
     for (let t = 0; t < 30; t++) { const X = rng.i(1, W - 2), Y = rng.i(1, H - 2), c = G.code(X, Y); if (!G.inside(X, Y) || G.isRes(X, Y) || !(c === T.CRATE || c === T.ROCK || c === T.BARREL)) continue; const mc = G.inside(W - 1 - X, Y) ? G.code(W - 1 - X, Y) : -1; if (mc === c) { G.put(X, Y, T.FLOOR); break; } }
   }
 }
+// 밀도: 전투 방이 너무 휑하면(안쪽 열린 비율이 목표보다 높으면) 스탬프를 몇 개 더 놓는다. 목표는 방마다 0.70~0.83 사이에서 무작위.
+const DENSITY_KINDS = new Set(["normal", "elite"]), DENSITY_TARGET = [0.70, 0.83];
+function openRatio(G) { let inner = 0, free = 0; for (let Y = 1; Y < G.H - 1; Y++) for (let X = 1; X < G.W - 1; X++) { if (!G.inside(X, Y) || G.border(X, Y)) continue; inner++; if (!T_SOLID[G.code(X, Y)]) free++; } return inner ? free / inner : 1; }
+function topUp(G, rng, a, floor) {
+  const target = DENSITY_TARGET[0] + rng.f() * (DENSITY_TARGET[1] - DENSITY_TARGET[0]); let pool = [];
+  if (a && a.stampSets) for (const set of a.stampSets) pool.push(...TileContent.stampsFor(set, floor));
+  if (!pool.length) pool = TileContent.stampsFor(null, floor).filter(st => st.rows.length * st.rows[0].length <= 12); // B가 없는 구성은 작은 스탬프 아무거나
+  if (!pool.length) return;
+  for (let k = 0; k < 12 && openRatio(G) > target; k++) { const st = rng.weighted(pool, x => x.weight); if (st) placeStamp(G, st, rng, quickConnected); }
+}
 function buildOnce(room, floor, players, rng) {
   const flip = [rng.chance(0.5), rng.chance(0.5)], G = new Generator(room, floor, players, rng, flip), a = pickArchetype(room.type, G.shape, floor, rng);
   G.names.push(a ? a.id : "empty"); G.arch = a;
@@ -215,6 +225,7 @@ function buildOnce(room, floor, players, rng) {
     for (let k = 0; k < n && pool.length; k++) { const st = rng.weighted(pool, s => s.weight); if (st && placeStamp(G, st, rng, quickConnected)) used.add(st.set || st.id); }
     for (const s of used) G.names.push(s);
   }
+  if (DENSITY_KINDS.has(room.type)) topUp(G, rng, a, floor); // 너무 휑하면 스탬프를 더 놓는다
   if (TileGenOptions.perturb && PERTURB_KINDS.has(room.type)) { perturb(G, rng); breakSymmetry(G, rng); }
   G.finishFrame();
   return G;
@@ -225,9 +236,8 @@ function buildLayout(room, floor = 3, players = 1) {
     const G = buildOnce(room, floor, players, new Rng(hash2(base, attempt + 1))), v = validate(G);
     if (v.ok) return finishLayout(G, v, attempt + 1, false);
   }
-  const rng = new Rng(base), G = new Generator(room, floor, players, rng, [false, false]), ph = TileContent.archetypes.find(a => a.id === "ph-open" || a.id === "ph-special" && a.kinds.includes(room.type)) || null; G.names.push("fallback");
-  const sp = TileContent.archetypes.find(a => a.id === "ph-special" && a.kinds.includes(room.type));
-  const a = sp || ph; if (a) { const out = a.build(G.makeCtx()) || {}; G.apply(out); } else G.finishFrame(); G.finishFrame();
+  // 안전한 빈 방: 테두리·문·예약 구역만 (모든 시도가 실패했을 때)
+  const G = new Generator(room, floor, players, new Rng(base), [false, false]); G.names.push("fallback"); G.finishFrame();
   const v = validate(G); return finishLayout(G, v.ok ? v : { ok: true, reach: floodTiles(G.map, [G.ij(...(G.entries[0] || G.checks[0] || [1, 1]))], 2), ratio: 1 }, 15, true);
 }
 // 콘텐츠가 알려준 slots(뒤집힌 틀의 타일 좌표 [x,y])를 월드 좌표 {x,y}로 바꾼다 (배열·중첩 배열 모두)
