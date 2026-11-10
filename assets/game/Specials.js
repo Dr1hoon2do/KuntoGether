@@ -1,14 +1,19 @@
 // 특수 방: 가시방 · 희생방 · 도박방 · 매복방 · 서재(열쇠). 정의 표는 Floor.js의 SPECIAL_ROOMS (층 범위·확률·이름·색).
 // 이 파일은 (1) 방 레이아웃 SPECIAL_LAYOUT, (2) 방에 들어갔을 때 내용을 채우는 Specials.populate, (3) 방이 도는 동안 동작하는 컨트롤러(Specials.create)를 가진다.
 //   · 가시방: 처음 들어갈 때 모두 피해 1(체력 1은 남김). 바닥에 가시 판이 주기적으로 솟는다(준비 → 솟음). 건너편에 보상 아이템
-//   · 희생방: 제단에 닿으면 체력 1을 바치고(체력 1이면 거부), 바친 횟수별로 정해진 종류의 보상이 나온다 (SAC_TABLE)
+//   · 희생방: 제단에 닿으면 체력 1을 바친다(체력 1이어도 바칠 수 있다 — 죽으면 보스 방 클리어 때 부활). 바친 횟수별로 정해진 종류의 보상이 나온다 (SAC_TABLE)
 //   · 도박방: 기계 앞에서 공격 = 3G를 넣고 돌리기. 결과 표 GAMBLE_TABLE, 가끔 고장
 //   · 매복방: 문이 잠기고 적이 3번에 걸쳐 몰려온다 → 클리어 보상(인원수만큼 아이템)
+//   · 악마 상점(devil): 보스 방을 클리어할 때 보스전에서 맞은 횟수에 따라 확률로 열리는 옆방. 골드 대신 체력(하트)으로 산다 (아래 DEVIL_*)
 //   · 서재: 열쇠 1개로 들어간다. 인원수+2개의 아이템 중 인원수만큼만 고를 수 있다 (group)
 const DIRV = { N: [0, 1], S: [0, -1], E: [1, 0], W: [-1, 0] };
 const SPIKE_CYCLE = 2.8, SPIKE_SAFE = 1.5, SPIKE_WARN = 0.45;                  // 안전 1.5초 → 준비 0.45초 → 솟음 0.85초
 const SAC_TABLE = ["coins2", "key", "heart", "coins4", "item", "weapon", "active", "jackpot"];  // 바친 횟수 1~8번째 보상 (고정)
 const GAMBLE_PRICE = 3;
+// 악마 상점: 보스전에서 맞은 횟수(누가 맞든 피해를 입을 때마다 1)에 따라 열릴 확률 = 0.5^맞은 횟수 (0번 100% · 1번 50% · 2번 25% · 3번 12.5% …).
+// 값은 체력(하트)으로 낸다: 패시브·무기 1 · 액티브 2, 1체력 → 8G, 1체력 → 열쇠 3개
+const DEVIL_GOLD = 8, DEVIL_KEYS = 3;
+function devilChance(hits) { return Math.pow(0.5, Math.max(0, Math.floor(hits || 0))); }
 const GAMBLE_TABLE = [["nothing", 40], ["c3", 24], ["c5", 11], ["c10", 4], ["key", 8], ["heart", 6], ["boom", 5], ["item", 2]];  // [결과, 가중치]
 
 const SPECIAL_LAYOUT = {
@@ -33,6 +38,7 @@ const SPECIAL_LAYOUT = {
     L.names.push("gamble");
   },
   ambush(L, room) { const t = [...CELL_TPL].filter(t => ["arenaGates", "arenaPinwheel", "pillarRing", "cornerBunkers", "mirrorCover", "centerFort", "pillars4"].includes(t.id)); const p = pickOne(t); L.frame(0, 0, Math.random() < 0.5 ? -1 : 1, Math.random() < 0.5 ? -1 : 1); p.fn(L); L.names.push("ambush:" + p.id); },
+  devil(L) { for (const sx of [-1, 1]) for (const sy of [-1, 1]) L.add("pillar", sx * 150, sy * 70, 26, 26); L.names.push("devil"); },
   library(L) { L.add("wall", -100, 82, 100, 26); L.add("wall", 100, 82, 100, 26); L.add("pillar", -165, -70, 26, 26); L.add("pillar", 165, -70, 26, 26); L.names.push("library"); },
 };
 
@@ -82,12 +88,12 @@ class SacrificeCtl {
   }
   sacrifice(h, ap) {
     const g = this.g; this.cd = 0.9;
-    if (h.hp <= 1) { SFX.play("block"); return; }                                  // 마지막 체력은 바칠 수 없다
-    h.hp -= 1; h.invuln = Math.max(h.invuln, 0.9); h.draw.flash = 0.1; h.hurtT = 3; SFX.play("hurt");
+    h.hp -= 1; h.invuln = Math.max(h.invuln, 0.9); h.draw.flash = 0.1; h.hurtT = 3; SFX.play("hurt");   // 체력 1이어도 바칠 수 있다 (죽으면 보스 방 클리어 때 부활)
     const a = Math.atan2(h.transform.position.y - ap.y, h.transform.position.x - ap.x); h.kx = Math.cos(a) * 110; h.ky = Math.sin(a) * 110; h.swing = null;
     g.fx.emit(ap.x, ap.y, { count: 12, colors: ["#b71c1c", "#ef5350", "#fff"], speed: [20, 80], life: [0.3, 0.6], size: [1, 2.2], fade: true }); g.cam.shake(2, 0.2);
     h.fire?.("damaged", 1);
     const n = ++this.st.count; this.altar.count = n; this.reward(SAC_TABLE[n - 1], n, ap);
+    if (h.hp <= 0) h.die();                                                           // 앙크 같은 부활 효과가 있으면 Hero.die가 처리한다
   }
   reward(kind, n, ap) {
     const g = this.g, np = g._np(), R = (i = 0) => { const a = n * 2.4 + i * 1.3, s = g._freeSpot(ap.x + Math.cos(a) * 36, ap.y + Math.sin(a) * 36, 12); return [s.x, s.y]; };
@@ -144,6 +150,11 @@ const Specials = {
     if (t === "gamble") return new GambleCtl(game, room);
     return null;
   },
+  // 보스 방을 클리어했을 때 부른다: 악마 상점 방을 만들고 보스 방에 포탈을 연다 (한 번 열리면 그 층 동안 계속 열려 있다)
+  openDevil(game, boss) {
+    boss.devil = boss.devil || { type: "devil", x: boss.x, y: boss.y, visited: false, cleared: true, spawned: false, items: [], obs: null, big: false, cells: [[0, 0]], nb: { S: boss }, dist: boss.dist };
+    boss.devilOpen = true; game._makePortal(); SFX.play("warn"); return boss.devil;
+  },
   // 방에 처음 들어갔을 때 한 번: 내용물 채우기
   populate(game, room, np) {
     const t = room.type, lay = room.layout || {}, takenP = game._heldItems(), takenA = game._heldActives();
@@ -160,6 +171,14 @@ const Specials = {
       }
     } else if (t === "sacrifice") { room.cleared = true; room.sp = { count: 0 }; }
     else if (t === "gamble") { room.cleared = true; room.sp = { plays: 0, broken: [] }; }
+    else if (t === "devil") { // 악마 상점: 인원수에 따라 품목이 늘어난다 (일반 상점처럼)
+      room.cleared = true; const items = [], pn = Math.max(1, Math.ceil((2 + np * 2) * 0.4)), wn = Math.max(1, Math.ceil((2 + np * 2) * 0.2)), an = 1 + Math.floor(np / 2);
+      for (let i = 0; i < pn; i++) items.push({ ...game._itemSlot(takenP, takenA, 0), hpPrice: 1 });                                       // 패시브 1하트
+      for (let i = 0; i < wn; i++) items.push({ type: "weapon", weapon: randomWeapon(game.floorNum + 5, 1), hpPrice: 1 });                     // 무기 1하트
+      for (let i = 0; i < an; i++) { const id = randomActiveId(takenA); takenA.add(id); items.push({ type: "active", id, state: null, hpPrice: 2 }); } // 액티브 2하트
+      items.push({ type: "trade", give: { gold: DEVIL_GOLD }, stock: np, hpPrice: 1 }); items.push({ type: "trade", give: { keys: DEVIL_KEYS }, stock: 1, hpPrice: 1 });
+      const pos = game._layout(items.length, 6); items.forEach((it, i) => game._makePickup({ ...it, price: 0, x: pos[i].x, y: pos[i].y }));
+    }
     else if (t === "ambush") { room.waves = 3; game._spawnWave(false, 1); }
     else if (t === "library") {
       room.cleared = true; const n = np + 2, pos = game._layout(n, 8); room.groupLeft = { lib: np };

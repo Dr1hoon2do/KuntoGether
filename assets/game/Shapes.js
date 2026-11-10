@@ -25,7 +25,8 @@ const DRAW_MATRIX = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 // 방 바닥·벽·문. 문은 이웃 방이 있는 쪽에만 생기고, 전투 중이면 잠긴다(빨강). 문 위에 가려는 방 종류가 표시된다.
 const ROOM_COLORS = { start: "#5c8", normal: "#889", elite: "#fa4", treasure: "#fd3", shop: "#4d8", boss: "#f55" };
 const ROOM_ICONS = { start: "◆", normal: "·", elite: "!", treasure: "★", shop: "$", boss: "☠" };
-for (const [k, v] of Object.entries(SPECIAL_ROOMS)) { ROOM_COLORS[k] = v.color; ROOM_ICONS[k] = v.icon; } // 특수 방(가시·희생·도박·매복·서재)
+for (const [k, v] of Object.entries(SPECIAL_ROOMS)) { ROOM_COLORS[k] = v.color; ROOM_ICONS[k] = v.icon; }
+ROOM_COLORS.devil = "#b71c1c"; ROOM_ICONS.devil = "Ψ"; // 특수 방(가시·희생·도박·매복·서재)
 const FLOOR_TINTS = ["#2a2420", "#232a28", "#2a2329", "#292a22", "#222a2a", "#2a2222", "#28242c", "#2c2020"];
 const DOOR_W = 30;
 class ArenaRenderer extends Renderer {
@@ -62,9 +63,9 @@ class ArenaRenderer extends Renderer {
   }
   render(ctx, camera) {
     const m = camera.viewMatrix, g = this.game, locked = g.state !== "explore";
-    const tint = FLOOR_TINTS[(g.floorNum - 1) % FLOOR_TINTS.length], cells = ARENA.cells;
+    const devil = g.cur && g.cur.type === "devil", tint = devil ? "#2b1013" : FLOOR_TINTS[(g.floorNum - 1) % FLOOR_TINTS.length], cells = ARENA.cells; // 악마 상점은 붉은 검정 바닥
     let h = g.floorNum; for (const c of cells) h = (h * 31 + c.x * 7 + c.y * 13) | 0;
-    const s = Math.hypot(m.a, m.b), key = h + "|" + cells.length;
+    const s = Math.hypot(m.a, m.b), key = h + "|" + cells.length + (devil ? "d" : "");
     if (key !== this._key || Math.abs(s - this._scale) > 0.001 * s && performance.now() - this._built > 300) { this._key = key; this._bake(s, tint); }
     const k = s / this._scale; // 배율이 조금 달라도 늘려서 찍는다 (줌 트윈 중 매 프레임 다시 굽지 않게)
     // 화면 픽셀에 맞춰 찍는다 (확대·축소 없이 1:1이면 선이 번지지 않는다)

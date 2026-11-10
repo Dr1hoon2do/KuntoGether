@@ -21,7 +21,7 @@ class Game extends Component {
     this.floorNum = 1; this.map = null; this.cur = null; this.state = "explore"; // explore | fight | over | victory
     this.nextId = 0; this.overTimer = 0; this.introTimer = 0; this.introText = "";
     this.doorHold = 0; this.stairsHold = 0; this.stairsGO = null;
-    this.usedBosses = new Set(); this.gold = 0; this.keys = 0; this.obstacles = []; this.walls = []; this.bombs = []; this.spObjs = []; this.sp = null; this.stairsPos = null; // gold·keys: 팀 공유
+    this.usedBosses = new Set(); this.gold = 0; this.keys = 0; this.obstacles = []; this.walls = []; this.bombs = []; this.spObjs = []; this.sp = null; this.stairsPos = null; this.portalPos = null; this.portalHold = 0; this.bossHits = 0; // gold·keys: 팀 공유
     this.difficulty = "normal"; this.runStarted = false; // 난이도는 첫 문으로 나가기 전(런 시작 전)에만 바꿀 수 있다
   }
   awake() {
@@ -40,7 +40,7 @@ class Game extends Component {
       itemsOnKill(this, by, e.enemy); // 처치 관련 아이템·세트 효과 → kill 훅
       if (!e.enemy.boss && Math.random() < 0.005 + by.stats.heartDrop) { const q = e.enemy.transform.position; this.spawnHeart(q.x, q.y); }
     }, { owner: this });
-    Events.on("hero.hit", () => this._flashVignette(), { owner: this });
+    Events.on("hero.hit", () => { this._flashVignette(); if (this.cur && this.cur.type === "boss" && this.state === "fight") this.bossHits++; }, { owner: this }); // 보스전에서 맞은 횟수 (악마 상점 확률)
     this.startRun();
   }
 
@@ -215,7 +215,7 @@ class Game extends Component {
     for (const w of this.walls) if (!w.isDestroyed) w.destroy(); this.walls = [];
     for (const b of this.bombs) if (!b.isDestroyed) b.destroy();
     for (const o of this.spObjs) if (!o.isDestroyed) o.destroy();
-    this.enemies = []; this.projs = []; this.pickups = []; this.obstacles = []; this.bombs = []; this.spObjs = []; this.sp = null;
+    this.enemies = []; this.projs = []; this.pickups = []; this.obstacles = []; this.bombs = []; this.spObjs = []; this.sp = null; this.portalPos = null;
     if (this.stairsGO) { this.stairsGO.destroy(); this.stairsGO = null; }
   }
   _leaveRoom() {
@@ -247,7 +247,7 @@ class Game extends Component {
     else {
       for (const d of room.items) this._makePickup(d);
       room.items = [];
-      if (room.type === "boss" && room.cleared && this.floorNum < MAX_FLOOR) this._makeStairs();
+      if (room.type === "boss" && room.cleared && this.floorNum < MAX_FLOOR) { this._makeStairs(); if (room.devilOpen) this._makePortal(); }
     }
     this.sp = Specials.create(this, room); // 특수 방(가시·희생·도박)의 동작
     this.state = room.cleared ? "explore" : "fight";
@@ -258,10 +258,10 @@ class Game extends Component {
     const np = this._np();
     if (room.type === "normal") this._spawnWave(false);
     else if (room.type === "elite") this._spawnWave(true);
-    else if (room.type === "boss") this._spawnBoss();
+    else if (room.type === "boss") { this.bossHits = 0; this._spawnBoss(); }
     else if (room.type === "treasure") { room.cleared = true; this._stockTreasure(np); }
     else if (room.type === "shop") { room.cleared = true; this._stockShop(np); }
-    else if (SPECIAL_ROOMS[room.type]) Specials.populate(this, room, np);
+    else if (SPECIAL_ROOMS[room.type] || room.type === "devil") Specials.populate(this, room, np);
   }
   // 적 등장 자리: 레이아웃의 등장 구역(없으면 방 전체)에서, 도달 가능하고 지형·플레이어에서 떨어진 곳
   _spawnPos() {
@@ -360,8 +360,37 @@ class Game extends Component {
       for (let i = 0; i < np; i++) this._makePickup({ ...this._itemSlot(takenP, takenA, 0.25), price: 0, x: pos[i].x, y: pos[i].y });
       for (let i = 0; i < np; i++) this.spawnWeaponPickup(pos[np + i].x, pos[np + i].y, randomWeapon(f + 5, 1));
       if (f >= MAX_FLOOR) { this.state = "victory"; this.overTimer = 14; this.cam.shake(8, 1);  SFX.play("win"); }
-      else { this._makeStairs();  }
+      else { this._makeStairs(); if (Math.random() < devilChance(this.bossHits)) Specials.openDevil(this, room); } // 안 맞을수록 악마 상점이 열릴 확률이 높다
     }
+  }
+  // 악마 상점으로 가는 문(포탈): 보스 방 한쪽에 열린다. 계단은 그대로 쓸 수 있다
+  _makePortal() {
+    const st = this.stairsPos || { x: 0, y: 48 }, sp = this._freeSpot(st.x - 56, st.y, 18); this.portalPos = sp; this.portalHold = 0;
+    const go = this.App.create("devilPortal"); go.transform.setPosition(sp.x, sp.y);
+    go.addComponent(new DrawRenderer(ctx => {
+      const t = performance.now() / 1000, r = 13 + Math.sin(t * 5) * 1;
+      ctx.fillStyle = "#12060a"; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
+      ctx.strokeStyle = "#e53935"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.stroke();
+      ctx.strokeStyle = "#b71c1c"; ctx.lineWidth = 1; ctx.beginPath(); // 거꾸로 선 별(오각별)
+      for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + t * 0.6 + i * 4 * Math.PI / 5; const x = Math.cos(a) * r * 0.72, y = Math.sin(a) * r * 0.72; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); } ctx.closePath(); ctx.stroke();
+      ctx.fillStyle = "#e53935"; ctx.globalAlpha = 0.18 + this.portalHold * 0.5 + 0.08 * Math.sin(t * 7); ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+      for (let i = 0; i < 6; i++) { const a = t * 1.5 + i * 1.047, d = r + 2 + 2 * Math.sin(t * 6 + i); ctx.fillStyle = "#ff7043"; ctx.fillRect(Math.cos(a) * d - 1, Math.sin(a) * d - 1, 2, 2); } // 불티
+    }, 30, { order: 1 }));
+    this.spObjs.push(go);
+  }
+  _updatePortal(dt) {
+    if (!this.portalPos || !this.cur || this.cur.type !== "boss") return;
+    const alive = this.heroes.filter(h => h.alive); if (!alive.length) return;
+    if (this.portalHold < 0) { this.portalHold = Math.min(0, this.portalHold + dt); return; } // 돌아온 직후엔 잠깐 쉰다
+    const pp = this.portalPos, inside = alive.filter(h => Math.hypot(h.transform.position.x - pp.x, h.transform.position.y - pp.y) < 17).length;
+    if (inside >= Math.ceil(alive.length / 2)) this.portalHold += dt / 1.0; else this.portalHold = Math.max(0, this.portalHold - dt);
+    if (this.portalHold >= 1) { this.portalHold = 0; const devil = this.cur.devil; if (devil) { SFX.play("warn"); this.enterRoom(devil, null); } }
+  }
+  // 악마 상점에서 돌아온다: 보스 방의 포탈 옆에 선다
+  _leaveDevil(boss) {
+    this.enterRoom(boss, null); const pp = this.portalPos || { x: 0, y: 48 }, n = this.heroes.length;
+    this.heroes.forEach((h, i) => { const q = this._freeSpot(pp.x + (i - (n - 1) / 2) * 16, pp.y - 30, 8); h.transform.setPosition(q.x, q.y); });
+    this.portalHold = -1.5; this._updateCamera(0, true);
   }
   _makeStairs() {
     const sp = this._freeSpot(0, 48, 18); this.stairsPos = sp; const go = this.App.create("stairs"); go.transform.setPosition(sp.x, sp.y);
@@ -429,7 +458,7 @@ class Game extends Component {
       if (this.state === "fight") {
         if (this.enemies.length === 0) { if (this.cur.waves > 1) { this.cur.waves--; this._spawnWave(false, 0.85); SFX.play("warn"); } else this.clearRoom(); } // 매복방은 3번에 걸쳐 몰려온다
         else if (this.heroes.every(h => !h.alive)) { this.state = "over"; this.overTimer = 6; SFX.play("over"); }
-      } else if (this.state === "explore") { this._updateDoors(dt); this._updateStairs(dt); }
+      } else if (this.state === "explore") { this._updateDoors(dt); this._updateStairs(dt); this._updatePortal(dt); }
       else { this.overTimer -= dt; if (this.overTimer <= 0) this.startRun(); } // over | victory
     }
     const now = performance.now();
@@ -457,7 +486,7 @@ class Game extends Component {
       const to = this.cur.nb[best];
       if (to.locked && this.keys < 1) { this.doorHold = 0; if (!(this._lockSfx > performance.now())) { SFX.play("block"); this._lockSfx = performance.now() + 700; } return; } // 열쇠가 없으면 열리지 않는다
       this.doorHold += dt / 0.6;
-      if (this.doorHold >= 1) { if (to.locked) { to.locked = false; this.keys--; SFX.play("item"); } this.enterRoom(to, best); }
+      if (this.doorHold >= 1) { if (to.locked) { to.locked = false; this.keys--; SFX.play("item"); } if (this.cur.type === "devil") this._leaveDevil(to); else this.enterRoom(to, best); }
     }
     else this.doorHold = Math.max(0, this.doorHold - dt * 2);
   }

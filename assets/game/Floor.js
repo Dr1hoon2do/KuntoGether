@@ -33,6 +33,7 @@ const SPECIAL_ROOMS = {
   library:   { name: "서재", color: "#4fc3f7", icon: "▤", min: 3, max: 8, chance: 0.16, locked: true },
 };
 for (const [k, v] of Object.entries(SPECIAL_ROOMS)) ROOM_NAMES[k] = v.name;
+ROOM_NAMES.devil = "악마 상점"; // 보스 방 옆방 (지도에는 없다: Specials.openDevil)
 // 이번 층에 나올 특수 방 종류 (확률대로 굴려서 최대 MAX_SPECIAL개)
 function rollSpecials(f, rnd = Math.random) {
   const out = []; for (const k of Object.keys(SPECIAL_ROOMS).sort(() => rnd() - 0.5)) { const s = SPECIAL_ROOMS[k]; if (out.length < MAX_SPECIAL && f >= s.min && f <= s.max && rnd() < s.chance) out.push(k); }

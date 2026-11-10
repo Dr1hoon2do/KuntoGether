@@ -241,12 +241,12 @@ function replayRoom(g) {
   for (const h of g.heroes) g.puff(h, ["#ce93d8", "#fff"]);
   SFX.play("warn"); return true;
 }
-// 다른 방으로 순간이동. which: "start" 시작 방 / "random" 보스 외 무작위 방
+// 다른 방으로 순간이동 (잠긴 방 — 열쇠가 필요한 보물방·상점·서재 — 은 제외). which: "start" 시작 방 / "random" 보스 외 무작위 방
 function warp(g, which) {
   const m = g.map; if (!m || !g.cur) return false;
   let r = null;
   if (which === "start") r = m.start;
-  else { const c = m.list.filter(x => x !== g.cur && x.type !== "boss"); r = c.length ? c[Math.floor(Math.random() * c.length)] : null; }
+  else { const c = m.list.filter(x => x !== g.cur && x.type !== "boss" && !x.locked); r = c.length ? c[Math.floor(Math.random() * c.length)] : null; }
   if (!r || r === g.cur) return false;
   if (!g.cur.cleared) g.cur.spawned = false; // 싸우던 방을 떠나면 다음에 들어올 때 다시 시작된다
   g.enterRoom(r, null); return true;
