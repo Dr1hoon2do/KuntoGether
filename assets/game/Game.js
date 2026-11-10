@@ -200,7 +200,7 @@ class Game extends Component {
       const c = cells[Math.floor(Math.random() * cells.length)]; x = c.x + (Math.random() * 2 - 1) * spread; y = c.y + (Math.random() * 2 - 1) * spread * 0.7;
       if (m) { // 타일 기준: 비어 있고 닿을 수 있는 타일의 가운데 근처
         const i = m.ti(x), j = m.tj(y);
-        if (m.free(i, j) && (!lay || !lay.reach || lay.reach[m.ix(i, j)])) return { x: m.cx(i) + (Math.random() - 0.5) * 10, y: m.cy(j) + (Math.random() - 0.5) * 10 };
+        if (m.free(i, j) && (!lay || !lay.reach || lay.reach[m.ix(i, j)])) return { x: m.cx(i), y: m.cy(j) }; // 타일 가운데 (코인은 거기서 ±4 흩어진다)
         continue;
       }
       let bad = false; for (const o of this.obstacles) { const q = o.transform.position; if (Math.abs(q.x - x) < o.w / 2 + 9 && Math.abs(q.y - y) < o.h / 2 + 9) { bad = true; break; } }
@@ -306,6 +306,14 @@ class Game extends Component {
   }
   // (x,y) 근처에서 지형에 안 겹치는 가장 가까운 자리 (방 안, 나선형으로 찾는다)
   _freeSpot(x, y, r = 12) {
+    const m = this.tiles, lay = this.cur && this.cur.layout;
+    if (m) { // 타일 기준: 요청한 자리가 비어 있으면 그대로, 아니면 가장 가까운, 닿을 수 있는 빈 타일의 가운데
+      const ok = (px, py, rr) => { const i = m.ti(px), j = m.tj(py); return m.free(i, j) && (!lay || !lay.reach || lay.reach[m.ix(i, j)]) && !this.obstacleAt(px, py, rr); };
+      if (ok(x, y, r)) return { x, y };
+      const cand = []; for (let j = 0; j < m.rows; j++) for (let i = 0; i < m.cols; i++) if (m.free(i, j) && (!lay || !lay.reach || lay.reach[m.ix(i, j)])) { const cx = m.cx(i), cy = m.cy(j); cand.push([(cx - x) * (cx - x) + (cy - y) * (cy - y), cx, cy]); }
+      cand.sort((a, b) => a[0] - b[0]);
+      for (const rr of [r, Math.min(r, 12), 8]) for (const [, cx, cy] of cand) if (!this.obstacleAt(cx, cy, rr)) return { x: cx, y: cy };
+    }
     const cells = ARENA.cells && ARENA.cells.length ? ARENA.cells : [{ x: 0, y: 0 }], inside = (px, py) => cells.some(c => Math.abs(px - c.x) <= ARENA.BASE_W / 2 - 10 && Math.abs(py - c.y) <= ARENA.BASE_H / 2 - 10);
     for (let k = 0; k < 90; k++) {
       const a = k * 2.4, d = k === 0 ? 0 : 5.5 * Math.sqrt(k), px = x + Math.cos(a) * d, py = y + Math.sin(a) * d;
