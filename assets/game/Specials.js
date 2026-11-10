@@ -6,7 +6,6 @@
 //   · 매복방: 문이 잠기고 적이 3번에 걸쳐 몰려온다 → 클리어 보상(인원수만큼 아이템)
 //   · 악마 상점(devil): 보스 방을 클리어할 때 보스전에서 맞은 횟수에 따라 확률로 열리는 옆방. 골드 대신 체력(하트)으로 산다 (아래 DEVIL_*)
 //   · 서재: 열쇠 1개로 들어간다. 인원수+2개의 아이템 중 인원수만큼만 고를 수 있다 (group)
-const DIRV = { N: [0, 1], S: [0, -1], E: [1, 0], W: [-1, 0] };
 const SPIKE_CYCLE = 2.8, SPIKE_SAFE = 1.5, SPIKE_WARN = 0.45;                  // 안전 1.5초 → 준비 0.45초 → 솟음 0.85초
 const SAC_TABLE = ["coins2", "key", "heart", "coins4", "item", "weapon", "active", "jackpot"];  // 바친 횟수 1~8번째 보상 (고정)
 const GAMBLE_PRICE = 3;
@@ -16,26 +15,7 @@ const DEVIL_GOLD = 8, DEVIL_KEYS = 3;
 function devilChance(hits) { return Math.pow(0.5, Math.max(0, Math.floor(hits || 0))); }
 const GAMBLE_TABLE = [["nothing", 40], ["c3", 24], ["c5", 11], ["c10", 4], ["key", 8], ["heart", 6], ["boom", 5], ["item", 2]];  // [결과, 가중치]
 
-// 특수 방·상점·보물방의 배치도 타일맵 위에 만든다. 함수는 (G, room, R) — G.ownerView()는 문이 있는 칸의 지역 좌표(위쪽이 r=0), R은 시드 난수.
-//   가시 타일(T.SPIKE)은 걸어 다닐 수 있는 바닥이고, 가시 판의 동작·그림은 SpikeField가 맡는다. 제단(T.ALTAR)은 2x3 타일을 차지하고 지름 50의 원 하나가 된다.
-const AMBUSH_BASE = ["arenaRing", "pillarRing", "bunkers", "fortress", "quadrants", "doubleRing", "pillarGrid", "colonnade"];
-const SPECIAL_LAYOUT = {
-  treasure(G, room, R) { const V = G.ownerView(); for (const [c, r] of [[2, 1], [13, 1], [2, 7], [13, 7]]) if (R.chance(0.75)) V.set(c, r, T.PILLAR); },
-  shop(G, room, R) { const V = G.ownerView(); for (const [c, r] of [[1, 1], [14, 1], [1, 7], [14, 7]]) V.set(c, r, T.PILLAR); if (R.chance(0.5)) { V.set(3, 0, T.BARREL); V.set(12, 0, T.BARREL); } },
-  // 가시방: 문 반대쪽에 보상, 그 사이에 가시 판 띠 3줄. 띠는 방을 가득 가로질러서 옆으로 돌아갈 수 없다
-  spike(G, room, R) {
-    const d = Object.keys(room.nb || {})[0] || "S", m = G.map, ow = G.owner, spots = [];
-    if (d === "N" || d === "S") { const V = G.ownerView(false, d === "S"); V.rect(0, 3, 15, 5, T.SPIKE); V.set(2, 7, T.PILLAR); V.set(13, 7, T.PILLAR); for (const u of [-50, 0, 50]) spots.push({ x: ow.x + u, y: V.wy(7) }); }
-    else { const V = G.ownerView(d === "E", false); V.rect(5, 0, 7, 8, T.SPIKE); V.set(13, 1, T.PILLAR); V.set(13, 7, T.PILLAR); for (const u of [-50, 0, 50]) spots.push({ x: V.wx(13), y: ow.y + u }); }
-    G.spots = spots; G.checks.push([m.ti(spots[1].x), m.tj(spots[1].y)]);
-  },
-  sacrifice(G, room, R) { const V = G.ownerView(); V.rect(7, 3, 8, 5, T.ALTAR); for (const [c, r] of [[3, 2], [12, 2], [3, 6], [12, 6]]) V.set(c, r, T.PILLAR); },
-  gamble(G, room, R) { const V = G.ownerView(); V.rect(4, 1, 4, 2, T.MACHINE); V.rect(11, 1, 11, 2, T.MACHINE); V.rect(1, 6, 1, 7, T.CRATE); V.rect(14, 6, 14, 7, T.CRATE); },
-  ambush(G, room, R) { const id = R.pick(AMBUSH_BASE), t = A_CELL.find(a => a.id === id); t.fn(G, G.ownerView(R.chance(0.5), R.chance(0.5)), R); },
-  devil(G, room, R) { const V = G.ownerView(); for (const [c, r] of [[3, 2], [12, 2], [3, 6], [12, 6]]) V.set(c, r, T.PILLAR); },
-  library(G, room, R) { const V = G.ownerView(); V.hline(1, 3, 6, T.WALL); V.hline(1, 9, 12, T.WALL); V.set(1, 7, T.PILLAR); V.set(14, 7, T.PILLAR); },
-  secret(G, room, R) { const V = G.ownerView(); for (const [c, r] of [[2, 2], [13, 2], [2, 6], [13, 6]]) V.set(c, r, T.PILLAR); },
-};
+// 특수 방·상점·보물방의 배치(지형)는 타일맵 콘텐츠(tiles/ArchetypesSpecial.js)가 만든다: S 가시 · a 제단 · m 기계 · p 받침대. 여기서는 그 타일이 만드는 동작만 맡는다.
 
 class SpikeField extends Component {
   constructor(game, tiles) { super(); this.game = game; this.tiles = tiles; this.t = 0; }
@@ -157,11 +137,11 @@ const Specials = {
       room.cleared = true;
       for (const h of game.heroes) if (h.alive && h.hp > 1) { h.hp -= 1; h.draw.flash = 0.1; h.hurtT = 3; }       // 들어오는 대가: 모두 체력 1 (마지막 1은 남김)
       SFX.play("hurt"); game.cam.shake(3, 0.25);
-      const spots = lay.spots || [], n = Math.min(spots.length, 1 + Math.floor(np / 3));
+      const spots = lay.spots || [], n = Math.min(spots.length, 1 + Math.floor(np / 3)), mid = Math.min(1, spots.length - 1); // 받침대(p)가 놓인 자리 — 가운데에 아이템, 사람이 많으면 하나 더
       for (let i = 0; i < spots.length; i++) {
         const s = spots[i];
-        if (i === 1 && n >= 1) game._makePickup({ ...game._itemSlot(takenP, takenA, 0.2), price: 0, x: s.x, y: s.y });
-        else if (i === 0 && n >= 2) game._makePickup({ ...game._itemSlot(takenP, takenA, 0.2), price: 0, x: s.x, y: s.y });
+        if (i === mid && n >= 1) game._makePickup({ ...game._itemSlot(takenP, takenA, 0.2), price: 0, x: s.x, y: s.y });
+        else if (i === (mid === 0 ? 1 : 0) && n >= 2) game._makePickup({ ...game._itemSlot(takenP, takenA, 0.2), price: 0, x: s.x, y: s.y });
         else game.spawnCoin(s.x, s.y, game.rollCoinValue(0.3));
       }
     } else if (t === "sacrifice") { room.cleared = true; room.sp = { count: 0 }; }

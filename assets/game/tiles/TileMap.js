@@ -5,12 +5,14 @@
 //   · 충돌: 같은 종류의 이웃한 벽·구덩이는 큰 직사각형 하나로 합쳐서(greedy merge) 콜라이더를 만든다. 부서지는 타일은 타일마다 하나.
 //   · 시드 난수(Rng)·검사용 flood fill·정적 타일 그리기(오프스크린 캔버스에 한 번)도 여기에 있다.
 const TILE = 25, TC = 16, TR = 9; // 타일 크기, 칸 하나의 가로·세로 타일 수
-const T = { FLOOR: 0, WALL: 1, PILLAR: 2, ROCK: 3, CRATE: 4, BARREL: 5, PIT: 6, ALTAR: 7, MACHINE: 8, SPIKE: 9 };
-const T_SOLID = [0, 1, 1, 1, 1, 1, 1, 1, 1, 0];             // 걸어서 못 지나가는 타일
-const T_STATIC = [0, 1, 1, 0, 0, 0, 1, 0, 0, 0];            // 오프스크린 캔버스에 구워 두는 타일 (벽·기둥·구덩이)
-const T_HP = { wall: 999, pillar: 999, rock: 1, crate: 3, barrel: 1, altar: 999, machine: 999, pit: 999 };
-const T_KIND = [null, "wall", "pillar", "rock", "crate", "barrel", "pit", "altar", "machine", null];
-const T_CHAR = { ".": 0, "#": 1, "P": 2, "R": 3, "C": 4, "B": 5, "O": 6, "A": 7, "M": 8, "S": 9 };
+const T = { FLOOR: 0, WALL: 1, PILLAR: 2, ROCK: 3, CRATE: 4, BARREL: 5, PIT: 6, ALTAR: 7, MACHINE: 8, SPIKE: 9, PEDESTAL: 10, CRACK: 11 };
+const T_SOLID = [0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1];       // 걸어서 못 지나가는 타일
+const T_STATIC = [0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0];      // 오프스크린 캔버스에 구워 두는 타일 (벽·기둥·구덩이)
+const T_HP = { wall: 999, pillar: 999, rock: 1, crate: 3, barrel: 1, altar: 999, machine: 999, pit: 999, crack: 999 };
+const T_KIND = [null, "wall", "pillar", "rock", "crate", "barrel", "pit", "altar", "machine", null, null, "crack"];
+// 규약(tiles/SPEC.md)의 타일 문자. k(금 간 벽)는 생성기만 쓴다. p = 아이템 받침대(걸을 수 있는 바닥, 보상·상점 품목이 놓일 자리)
+const T_CHAR = { ".": 0, "#": 1, "P": 2, "R": 3, "C": 4, "B": 5, "V": 6, "a": 7, "m": 8, "S": 9, "p": 10, "k": 11 };
+const T_LETTER = ".#PRCBVamSpk";
 
 // ── 시드 난수 ────────────────────────────────────────────────────────────────
 function hash2(a, b) { let h = (a ^ 0x9e3779b9) >>> 0; h = Math.imul(h ^ (b + 0x7f4a7c15 | 0), 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; return h >>> 0; }
@@ -27,7 +29,7 @@ class Rng {
 let TILEMAP_UID = 0;
 class TileMap {
   constructor(geo) {
-    this.uid = ++TILEMAP_UID; this.W = geo.w; this.H = geo.h; this.cols = Math.round(geo.w / TILE); this.rows = Math.round(geo.h / TILE); this.x0 = -geo.w / 2; this.y0 = -geo.h / 2;
+    this.uid = ++TILEMAP_UID; this.version = 0; this.W = geo.w; this.H = geo.h; this.cols = Math.round(geo.w / TILE); this.rows = Math.round(geo.h / TILE); this.x0 = -geo.w / 2; this.y0 = -geo.h / 2;
     const n = this.cols * this.rows; this.t = new Uint8Array(n); this.mask = new Uint8Array(n); this.res = new Uint8Array(n); // res: 항상 비워 둘 곳(문 앞·통로·보스 자리)
     this.cells = geo.cells.map(c => ({ x: c.x, y: c.y, dx: c.dx, dy: c.dy, i0: Math.round((c.x - CELL_W / 2 - this.x0) / TILE), j0: Math.round((c.y - CELL_H / 2 - this.y0) / TILE) }));
     for (const c of this.cells) for (let j = 0; j < TR; j++) for (let i = 0; i < TC; i++) this.mask[(c.j0 + j) * this.cols + c.i0 + i] = 1;
@@ -59,7 +61,7 @@ class TileMap {
         rect(i, j, i1, j1, kind);
       }
     };
-    merge(T.WALL, "wall"); merge(T.PIT, "pit"); merge(T.MACHINE, "machine", true);
+    merge(T.WALL, "wall"); merge(T.PIT, "pit"); merge(T.MACHINE, "machine", true); merge(T.CRACK, "crack");
     let ax0 = 1e9, ax1 = -1, ay0 = 1e9, ay1 = -1;
     for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
       const c = t[at(i, j)];
@@ -70,7 +72,9 @@ class TileMap {
     return out;
   }
   // 칸 (c.i0, c.j0)의 타일 문자열(위쪽이 첫 줄)
-  ascii(cell) { const rowsOut = []; for (let r = 0; r < TR; r++) { let s = ""; for (let c = 0; c < TC; c++) { const v = this.get(cell.i0 + c, cell.j0 + TR - 1 - r); s += ".#PRCBOAMS"[v]; } rowsOut.push(s); } return rowsOut; }
+  ascii(cell) { const rowsOut = []; for (let r = 0; r < TR; r++) { let s = ""; for (let c = 0; c < TC; c++) { const v = this.get(cell.i0 + c, cell.j0 + TR - 1 - r); s += T_LETTER[v]; } rowsOut.push(s); } return rowsOut; }
+  // 방 전체 문자열 (SPEC 좌표: y=0이 맨 위)
+  asciiAll() { const out = []; for (let y = 0; y < this.rows; y++) { let s = ""; for (let x = 0; x < this.cols; x++) s += this.mask[(this.rows - 1 - y) * this.cols + x] ? T_LETTER[this.t[(this.rows - 1 - y) * this.cols + x]] : " "; out.push(s); } return out; }
   signature() { let h = 2166136261; for (let k = 0; k < this.t.length; k++) { h ^= this.t[k] + (this.mask[k] << 5); h = Math.imul(h, 16777619) >>> 0; } return h >>> 0; }
 }
 
@@ -97,7 +101,7 @@ function floodTiles(map, starts, mode = 0) {
 function drawStaticTiles(ctx, map) {
   const { cols, rows, t } = map, S = TILE, kind = (i, j) => map.get(i, j);
   for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
-    const c = t[j * cols + i]; if (!T_STATIC[c]) continue; const x = map.x0 + i * S, y = map.y0 + j * S;
+    const c = t[j * cols + i]; if (c === T.PEDESTAL) { const px = map.x0 + (i + 0.5) * S, py = map.y0 + (j + 0.5) * S; ctx.fillStyle = "#00000030"; ctx.beginPath(); ctx.ellipse(px, py - 2, 10, 5, 0, 0, 7); ctx.fill(); ctx.strokeStyle = "#8d7f5a"; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(px, py - 1, 9, 4.5, 0, 0, 7); ctx.stroke(); continue; } if (!T_STATIC[c]) continue; const x = map.x0 + i * S, y = map.y0 + j * S;
     if (c === T.WALL) {
       const up = kind(i, j + 1) !== T.WALL, dn = kind(i, j - 1) !== T.WALL, lf = kind(i - 1, j) !== T.WALL, rt = kind(i + 1, j) !== T.WALL;
       ctx.fillStyle = "#5d5d6b"; ctx.fillRect(x, y, S, S);

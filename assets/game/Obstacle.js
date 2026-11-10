@@ -18,7 +18,7 @@ class Obstacle extends Component {
     this.seed = Math.random() * 100;
   }
   get destructible() { return this.kind === "crate" || this.kind === "barrel" || this.kind === "rock"; }
-  get solidOnly() { return this.kind === "pillar" || this.kind === "wall" || this.kind === "void" || this.kind === "altar" || this.kind === "machine" || this.kind === "pit"; } // 부서지지 않는 종류
+  get solidOnly() { return this.kind === "pillar" || this.kind === "wall" || this.kind === "void" || this.kind === "altar" || this.kind === "machine" || this.kind === "pit" || this.kind === "crack"; } // 부서지지 않는 종류
   get baked() { return this.kind === "pillar" || this.kind === "wall" || this.kind === "pit" || this.kind === "void"; } // 방 바닥 캔버스에 구워 그려지는 종류 (따로 안 그린다)
   setup() {
     if (!this.baked) this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), Math.max(this.w, this.h) + 6, { order: 2 }));
@@ -36,6 +36,13 @@ class Obstacle extends Component {
     if (this.kind === "pillar" || this.kind === "wall") {
       ctx.fillStyle = hit ? "#fff" : "#5d5d6b"; ctx.fillRect(-hw, -hh, w, h); ctx.fillStyle = "#7d7d8c"; ctx.fillRect(-hw, hh - 4, w, 4); ctx.fillStyle = "#6b6b7a"; ctx.fillRect(-hw + 3, -hh + 3, w - 6, h - 9);
       ctx.strokeStyle = "#2c2c36"; ctx.lineWidth = 1; ctx.strokeRect(-hw, -hh, w, h);
+    } else if (this.kind === "crack") { // 비밀방 입구: 벽인데 금이 가 있다 (맞으면 하얗게 번쩍이고 금이 커진다. 깨지면 문 틈이 열린다)
+      const k = 1 - Math.max(0, (this.game.cur && this.game.cur.secretHp) ?? 12) / 12, v = w > h;
+      ctx.fillStyle = hit ? "#fff" : "#5d5d6b"; ctx.fillRect(-hw, -hh, w, h); ctx.fillStyle = hit ? "#fff" : "#6b6b7a"; ctx.fillRect(-hw + 1, -hh + 1, w - 2, h - 6); ctx.fillStyle = "#7d7d8c"; ctx.fillRect(-hw, hh - 5, w, 5);
+      ctx.strokeStyle = "#2c2c36"; ctx.lineWidth = 1; ctx.strokeRect(-hw + 0.5, -hh + 0.5, w - 1, h - 1);
+      ctx.strokeStyle = hit ? "#444" : "#202026"; ctx.lineWidth = 1.2; ctx.beginPath(); const L = (v ? w : h) * 0.3, s2 = 1 + k * 0.8; // 금: 가운데에서 갈라져 나가는 선
+      ctx.moveTo(0, -hh * 0.2); ctx.lineTo(2 * s2, -hh * 0.7 * s2); ctx.lineTo(-1 * s2, -hh * 1.0); ctx.moveTo(0, -hh * 0.2); ctx.lineTo(-3 * s2, hh * 0.3); ctx.lineTo(1 * s2, hh * 0.8 * s2); ctx.moveTo(-3 * s2, hh * 0.3); ctx.lineTo(-6 * s2, hh * 0.45); ctx.stroke();
+      ctx.strokeStyle = "#a9a9b866"; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(1, -hh * 0.18); ctx.lineTo(3 * s2, -hh * 0.65 * s2); ctx.stroke();
     } else if (this.kind === "rock") {
       const rr = ROCK_R; // 둥근 상자: 충돌 모양과 똑같다
       ctx.fillStyle = hit ? "#fff" : "#7b6a58"; ctx.beginPath();

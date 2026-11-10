@@ -136,13 +136,19 @@ class Game extends Component {
     this.cam.shake(4, 0.25); SFX.play("boom");
   }
   // 비밀방: 현재 방에 숨은 문이 있으면 그 벽(금간 곳) 가까이의 폭발·공격이 벽을 깬다. dmg는 누적(체력 12), 폭발은 한 번에 깬다.
+  // 금 간 벽 타일이 부서져 문 틈(바닥)이 된다: 타일맵·콜라이더·바닥 캔버스 모두 갱신
+  _openCrack() {
+    const m = this.tiles; if (!m) return;
+    for (const o of [...this.obstacles]) if (o.kind === "crack") { o.dead = true; this.obstacles = this.obstacles.filter(q => q !== o); o.gameObject.destroy(); }
+    for (let k = 0; k < m.t.length; k++) if (m.t[k] === T.CRACK) m.t[k] = T.FLOOR; m.version++;
+  }
   secretPoint() { const r = this.cur; if (!r || !r.secret || !r.secret.hidden) return null; const [x, y] = doorPos(r.secretDir); return { x, y, dir: r.secretDir }; }
   secretDamage(x, y, dmg, reach = 22) {
     const sp = this.secretPoint(); if (!sp || Math.hypot(sp.x - x, sp.y - y) > reach) return false;
-    const r = this.cur; r.secretHp = (r.secretHp ?? 12) - dmg; r.secretFlash = 0.15; SFX.play("hit");
+    const r = this.cur; r.secretHp = (r.secretHp ?? 12) - dmg; SFX.play("hit"); for (const o of this.obstacles) if (o.kind === "crack") o.flash = 0.12;
     this.fx.emit(sp.x, sp.y, { count: 4, colors: ["#9e9e9e", "#5d5d6b"], speed: [10, 40], life: [0.2, 0.4], size: [1, 2], fade: true });
     if (r.secretHp > 0) return true;
-    revealSecret(this.map, r); this.doorHold = 0; this.cam.shake(4, 0.3); SFX.play("boom");
+    revealSecret(this.map, r); this._openCrack(); this.doorHold = 0; this.cam.shake(4, 0.3); SFX.play("boom");
     this.fx.emit(sp.x, sp.y, { count: 30, colors: ["#8d8d99", "#5d5d6b", "#fff"], speed: [30, 110], life: [0.3, 0.7], size: [1.5, 3], fade: true, area: 8 });
     return true;
   }
@@ -208,6 +214,8 @@ class Game extends Component {
   spawnActivePickup(x, y, id, price = 0) { return this._makePickup({ type: "active", id, price, x, y, state: null }); }
   // n개를 한 줄에 최대 8개씩 가지런히 놓을 자리 (cy: 가운데 높이)
   _layout(n, cy = 0) {
+    const lay = this.cur && this.cur.layout, ped = lay && lay.pedestals; // 방 구성이 받침대(p)를 정해 두었으면 그 자리에 놓는다
+    if (ped && ped.length >= n) { const pick = ped.slice(0, n).sort((a, b) => b.y - a.y || a.x - b.x); return pick.map(q => ({ x: q.x, y: q.y })); }
     const rows = Math.max(1, Math.ceil(n / 8)), per = Math.ceil(n / rows), out = [];
     for (let r = 0; r < rows; r++) { const cnt = Math.min(per, n - r * per), y = cy + ((rows - 1) / 2 - r) * 34; for (let i = 0; i < cnt; i++) out.push({ x: (i - (cnt - 1) / 2) * 44, y }); }
     for (let i = 0; i < out.length; i++) { // 지형 위에 놓이지 않게 옆으로 비킨다
@@ -247,7 +255,7 @@ class Game extends Component {
     this.cur = room; room.visited = true; this.doorHold = 0; this.stairsHold = 0; this.state = "explore";
     applyGeo(room); // 방 모양(1~4칸)과 크기. 카메라 배율은 그대로
     const hw0 = ARENA.w / 2, hh0 = ARENA.h / 2; this.camFollow.bounds = { minX: -hw0, maxX: hw0, minY: -hh0, maxY: hh0 };
-    if (room.obs === null) room.obs = generateObstacles(room, this.floorNum);
+    if (room.obs === null) room.obs = generateObstacles(room, this.floorNum, this._np());
     this.tiles = room.tiles; // 이 방의 타일맵 (부서진 지형은 여기서도 바닥이 된다)
     this._buildWalls();
     for (const d of room.obs) this._makeObstacle(d);
@@ -255,7 +263,7 @@ class Game extends Component {
     const n = this.heroes.length, side = dir ? OPP[dir] : "S", [dx0, dy0] = doorPos(side);
     this.heroes.forEach((h, i) => { // 들어온 문 앞에 모여서 시작
       const gap = Math.min(20, 150 / Math.max(1, n)), off = (i - (n - 1) / 2) * gap;
-      const [x, y] = side === "S" ? [dx0 + off, dy0 + 24] : side === "N" ? [dx0 + off, dy0 - 24] : side === "W" ? [dx0 + 24, dy0 + off] : [dx0 - 24, dy0 + off];
+      const [x, y] = side === "S" ? [dx0 + off, dy0 + 44] : side === "N" ? [dx0 + off, dy0 - 44] : side === "W" ? [dx0 + 44, dy0 + off] : [dx0 - 44, dy0 + off]; // 테두리 벽(한 타일) 안쪽에서 시작
       h.transform.setPosition(x, y); h.invuln = Math.max(h.invuln, 1.2 + h.stats.entryInvuln); h.swing = null; h.echoes = [];
       h.roomT = 0; h.hitThisRoom = false; h.heartBuffOn = false; // 방마다 초기화되는 조건부 효과(양파·낡은 장화·뼈다귀) h.cd = 0; h.kx = h.ky = 0;
       h.shield = Math.max(h.shield, h.stats.roomShield); h.comboN = 0; // 방마다 보호막 채움

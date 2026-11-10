@@ -56,22 +56,13 @@ class ArenaRenderer extends Renderer {
       c2.stroke();
     }
     if (g.tiles) drawStaticTiles(c2, g.tiles); // 벽·기둥·구덩이 (타일맵에서)
-    c2.strokeStyle = "#6a5a50"; c2.lineWidth = 3; c2.beginPath(); // 바깥 벽: 이웃 칸이 없는 쪽만
-    for (const c of cells) {
-      const l = c.x - cw / 2, r = c.x + cw / 2, b = c.y - ch / 2, t = c.y + ch / 2;
-      if (!has(c.dx, c.dy + 1)) { c2.moveTo(l, t); c2.lineTo(r, t); }
-      if (!has(c.dx, c.dy - 1)) { c2.moveTo(l, b); c2.lineTo(r, b); }
-      if (!has(c.dx + 1, c.dy)) { c2.moveTo(r, b); c2.lineTo(r, t); }
-      if (!has(c.dx - 1, c.dy)) { c2.moveTo(l, b); c2.lineTo(l, t); }
-    }
-    c2.stroke();
     this._x0 = x0; this._y1 = y1; this._scale = s; this._built = performance.now();
   }
   render(ctx, camera) {
     const m = camera.viewMatrix, g = this.game, locked = g.state !== "explore";
     const devil = g.cur && g.cur.type === "devil", tint = devil ? "#2b1013" : FLOOR_TINTS[(g.floorNum - 1) % FLOOR_TINTS.length], cells = ARENA.cells; // 악마 상점은 붉은 검정 바닥
     let h = g.floorNum; for (const c of cells) h = (h * 31 + c.x * 7 + c.y * 13) | 0;
-    const s = Math.hypot(m.a, m.b), key = h + "|" + cells.length + (devil ? "d" : "") + "|" + (g.tiles ? g.tiles.uid : 0);
+    const s = Math.hypot(m.a, m.b), key = h + "|" + cells.length + (devil ? "d" : "") + "|" + (g.tiles ? g.tiles.uid + "." + g.tiles.version : 0);
     if (key !== this._key || Math.abs(s - this._scale) > 0.001 * s && performance.now() - this._built > 300) { this._key = key; this._bake(s, tint); }
     const k = s / this._scale; // 배율이 조금 달라도 늘려서 찍는다 (줌 트윈 중 매 프레임 다시 굽지 않게)
     // 화면 픽셀에 맞춰 찍는다 (확대·축소 없이 1:1이면 선이 번지지 않는다)
@@ -80,14 +71,6 @@ class ArenaRenderer extends Renderer {
     if (Math.abs(k - 1) < 1e-3) ctx.drawImage(this._c, Math.round(dx), Math.round(dy)); else ctx.drawImage(this._c, dx, dy, this._c.width * k, this._c.height * k);
     ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
     if (!g.cur) return;
-    const sp = g.secretPoint(); // 비밀방: 벽에 은은한 금이 가 있다 (맞으면 깜빡이며 더 커진다)
-    if (sp) {
-      const fl = g.cur.secretFlash > 0, hpk = 1 - Math.max(0, g.cur.secretHp ?? 12) / 12;
-      if (fl) g.cur.secretFlash -= 1 / 60;
-      ctx.save(); ctx.translate(sp.x, sp.y); if (sp.dir === "N") ctx.scale(1, -1); else if (sp.dir === "E") ctx.rotate(Math.PI / 2); else if (sp.dir === "W") ctx.rotate(-Math.PI / 2); // 로컬 +y = 방 안쪽
-      ctx.strokeStyle = fl ? "#fff" : "#26262d"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-3, 0); ctx.lineTo(-1, 5); ctx.lineTo(-4, 9); ctx.moveTo(-1, 5); ctx.lineTo(3, 8); ctx.lineTo(2, 13 + hpk * 6); ctx.moveTo(3, 8); ctx.lineTo(7, 10 + hpk * 4); ctx.stroke();
-      ctx.strokeStyle = "#8d8d9a66"; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(-2.4, 0.5); ctx.lineTo(-0.2, 5.4); ctx.stroke(); ctx.restore();
-    }
     for (const [d, room] of Object.entries(g.cur.nb)) { // 문
       const [x, y] = doorPos(d), horiz = d === "N" || d === "S";
       ctx.fillStyle = locked ? "#c62828" : room.locked ? "#fdd835" : "#2e7d32"; // 노랑 = 열쇠가 필요한 문
