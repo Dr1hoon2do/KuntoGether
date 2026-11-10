@@ -8,6 +8,7 @@ const ROCK_R = 9; // 바위의 모서리 반지름 (그림과 충돌 모양이 �
 //   crate  : 상자 — 아무 공격으로 부서짐, 가끔 코인
 //   barrel : 폭발 통 — 부서지면 주변에 폭발(적·플레이어 모두 피해, 바위·상자도 연쇄 파괴)
 //   void   : L자 방의 빈 칸(보이지 않는 벽)
+//   altar  : 희생방의 제단(원, 안 부서짐) · machine : 도박방의 기계(상자꼴, 안 부서짐) — 동작은 Specials.js
 // 크기는 플레이어(지름 12)의 2~6배 — 탄막을 피해 숨거나 엄폐할 수 있을 만큼 크다.
 class Obstacle extends Component {
   constructor(game, d) {
@@ -16,10 +17,11 @@ class Obstacle extends Component {
     this.seed = Math.random() * 100;
   }
   get destructible() { return this.kind === "crate" || this.kind === "barrel" || this.kind === "rock"; }
+  get solidOnly() { return this.kind === "pillar" || this.kind === "wall" || this.kind === "void" || this.kind === "altar" || this.kind === "machine"; } // 부서지지 않는 종류
   setup() {
     this.draw = this.gameObject.addComponent(new DrawRenderer((ctx, r) => this._draw(ctx, r), Math.max(this.w, this.h) + 6, { order: 2 }));
     const o = { layer: "Obstacle", body: "static", data: this }; // 충돌 모양 = 그려지는 모양
-    this.col = this.gameObject.addComponent(this.kind === "barrel" ? Collider2D.circle(this.w / 2, o) : this.kind === "rock" ? Collider2D.rbox(this.w, this.h, ROCK_R, o) : Collider2D.box(this.w, this.h, o));
+    this.col = this.gameObject.addComponent(this.kind === "barrel" || this.kind === "altar" ? Collider2D.circle(this.w / 2, o) : this.kind === "rock" ? Collider2D.rbox(this.w, this.h, ROCK_R, o) : Collider2D.box(this.w, this.h, o));
   }
   data() { const p = this.transform.position; return { kind: this.kind, w: this.w, h: this.h, hp: this.hp, x: p.x, y: p.y }; }
   update(dt) { if (this.flash > 0) this.flash -= dt; }
@@ -37,6 +39,18 @@ class Obstacle extends Component {
       ctx.fillStyle = hit ? "#fff" : "#7b6a58"; ctx.beginPath();
       ctx.moveTo(-hw + rr, -hh); ctx.arc(hw - rr, -hh + rr, rr, -Math.PI / 2, 0); ctx.arc(hw - rr, hh - rr, rr, 0, Math.PI / 2); ctx.arc(-hw + rr, hh - rr, rr, Math.PI / 2, Math.PI); ctx.arc(-hw + rr, -hh + rr, rr, Math.PI, Math.PI * 1.5); ctx.closePath(); ctx.fill();
       ctx.strokeStyle = "#3e342a"; ctx.lineWidth = 1; ctx.stroke(); ctx.strokeStyle = "#a08c76"; ctx.beginPath(); ctx.moveTo(-hw * 0.4, -hh * 0.3); ctx.lineTo(hw * 0.1, -hh * 0.5); ctx.moveTo(hw * 0.2, hh * 0.35); ctx.lineTo(hw * 0.55, hh * 0.1); ctx.stroke();
+    } else if (this.kind === "altar") { // 희생방 제단: 돌 받침 + 피 웅덩이 + 바친 횟수만큼 붉은 점
+      const n = this.count || 0;
+      ctx.fillStyle = "#3a2b30"; ctx.beginPath(); ctx.arc(0, 0, hw, 0, 7); ctx.fill(); ctx.strokeStyle = "#1c1216"; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.fillStyle = "#6d1b2a"; ctx.beginPath(); ctx.arc(0, 0, hw * 0.62, 0, 7); ctx.fill();
+      ctx.fillStyle = "#cfd8dc"; for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + 0.3; ctx.beginPath(); ctx.moveTo(Math.cos(a - 0.12) * hw * 0.5, Math.sin(a - 0.12) * hw * 0.5); ctx.lineTo(Math.cos(a + 0.12) * hw * 0.5, Math.sin(a + 0.12) * hw * 0.5); ctx.lineTo(Math.cos(a) * hw * 0.88, Math.sin(a) * hw * 0.88); ctx.fill(); } // 가시
+      for (let i = 0; i < 8; i++) { ctx.fillStyle = i < n ? "#ff5252" : "#4a3a3f"; ctx.beginPath(); ctx.arc((i - 3.5) * 6, hh + 9, 2, 0, 7); ctx.fill(); }  // 바친 횟수 (글자 없이 점)
+    } else if (this.kind === "machine") { // 도박방 기계: 몸통 + 릴 3개 (돌릴 때 깜빡임, 고장나면 어두움)
+      const spin = this.spin > 0, dead = this.broken;
+      ctx.fillStyle = hit ? "#fff" : dead ? "#3b3b3b" : "#8e2d2d"; ctx.fillRect(-hw, -hh, w, h); ctx.strokeStyle = "#2a0d0d"; ctx.lineWidth = 1; ctx.strokeRect(-hw, -hh, w, h);
+      ctx.fillStyle = "#16120f"; ctx.fillRect(-hw + 3, -2, w - 6, 12);
+      for (let i = 0; i < 3; i++) { ctx.fillStyle = dead ? "#555" : spin ? (Math.floor(performance.now() / 70 + i) % 2 ? "#ffee58" : "#ef5350") : ["#ffee58", "#ef5350", "#66bb6a"][i]; ctx.fillRect(-hw + 4 + i * ((w - 8) / 3), 0, (w - 8) / 3 - 2, 8); }
+      ctx.fillStyle = dead ? "#444" : "#ffd54f"; ctx.fillRect(-hw + 5, hh - 7, w - 10, 3); ctx.fillStyle = "#222"; ctx.fillRect(hw, -4, 3, 10); ctx.beginPath(); ctx.arc(hw + 1.5, 8, 2.4, 0, 7); ctx.fill();
     } else if (this.kind === "crate") {
       ctx.fillStyle = hit ? "#fff" : "#a47532"; ctx.fillRect(-hw, -hh, w, h); ctx.strokeStyle = "#5a3d14"; ctx.lineWidth = 1; ctx.strokeRect(-hw, -hh, w, h);
       ctx.beginPath(); ctx.moveTo(-hw, -hh); ctx.lineTo(hw, hh); ctx.moveTo(hw, -hh); ctx.lineTo(-hw, hh); ctx.stroke();
@@ -50,7 +64,7 @@ class Obstacle extends Component {
   // n 피해. explosion=true면 바위도 부서진다.
   damage(n, by, explosion = false) {
     if (this.dead) return;
-    if (this.kind === "pillar" || this.kind === "wall" || this.kind === "void") return;
+    if (this.solidOnly) return;
     if (this.kind === "rock" && !explosion) { this.flash = 0.05; return; }
     this.hp -= n; this.flash = 0.08; SFX.play("hit");
     if (this.hp <= 0) this.die(by);
@@ -81,31 +95,4 @@ class Bomb extends Component {
   }
   update(dt) { this.t -= dt; if (this.t <= 0) { const p = this.transform.position; this.game.explode(p.x, p.y, 36, 12 * (this.owner ? this.owner.stats.dmg : 1), 0, this.owner); this.gameObject.destroy(); } }
 }
-
-// 방 하나에 놓을 지형 데이터를 만든다. 문 앞·시작 위치·보스 등장 위치는 비워 두고, 서로 26 이상 떨어뜨려서 지나갈 틈을 남긴다.
-// 큰 방(여러 칸)은 칸 수만큼 더 많이 놓는다.
-function generateObstacles(room) {
-  if (room.type === "treasure" || room.type === "shop") return [];
-  const geo = roomGeo(room), nCells = geo.cells.length, CW = ARENA.BASE_W, CH = ARENA.BASE_H;
-  const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
-  let count = room.type === "start" ? rnd(0, 2) : room.type === "boss" ? rnd(2, 3) : rnd(3, 5);
-  count = Math.round(count * Math.pow(nCells, 0.9));
-  const lanes = []; // 지나다녀야 하는 구역 (중심 x, y, 반폭 w, 반높이 h)
-  for (const d of Object.keys(room.nb)) { const x = geo.ox + ({ N: 0, S: 0, E: 1, W: -1 })[d] * (CW / 2 - 40), y = geo.oy + ({ N: 1, S: -1, E: 0, W: 0 })[d] * (CH / 2 - 40); lanes.push(d === "N" || d === "S" ? { x, y, w: 48, h: 44 } : { x, y, w: 44, h: 48 }); }
-  lanes.push({ x: geo.ox, y: geo.oy - CH / 2 + 34, w: 64, h: 40 }); // 처음 서는 곳(소유 칸 아래쪽 가운데)
-  if (room.type === "boss") lanes.push({ x: geo.ox, y: geo.oy + CH / 2 - 56, w: 60, h: 48 }); // 보스 등장 위치
-  const kinds = room.type === "boss" || room.type === "start" ? ["pillar", "pillar", "wall", "rock"] : ["pillar", "pillar", "wall", "crate", "crate", "crate", "barrel", "rock"];
-  const gap = room.type === "boss" ? 46 : 26; // 보스는 덩치가 커서 지나갈 틈을 더 넓게
-  const out = [];
-  for (let tries = 0; out.length < count && tries < 600; tries++) {
-    const kind = kinds[Math.floor(Math.random() * kinds.length)];
-    const o = kind === "pillar" ? { kind, w: 26, h: 26, hp: 999 } : kind === "wall" ? (Math.random() < 0.5 ? { kind, w: 26, h: 70, hp: 999 } : { kind, w: 70, h: 26, hp: 999 }) :
-              kind === "rock" ? { kind, w: 34, h: 28, hp: 1 } : kind === "crate" ? { kind, w: 22, h: 22, hp: 3 } : { kind, w: 22, h: 22, hp: 1 };
-    const c = geo.cells[Math.floor(Math.random() * geo.cells.length)];
-    o.x = c.x + (Math.random() * 2 - 1) * (CW / 2 - 50); o.y = c.y + (Math.random() * 2 - 1) * (CH / 2 - 50);
-    if (lanes.some(l => Math.abs(l.x - o.x) < l.w + o.w / 2 && Math.abs(l.y - o.y) < l.h + o.h / 2)) continue;
-    if (out.some(b => Math.abs(b.x - o.x) < (b.w + o.w) / 2 + gap && Math.abs(b.y - o.y) < (b.h + o.h) / 2 + gap)) continue;
-    out.push(o);
-  }
-  return out;
-}
+// (방 레이아웃 생성은 Rooms.js / RoomTemplates.js: generateObstacles)

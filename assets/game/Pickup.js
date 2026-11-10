@@ -132,7 +132,8 @@ class Pickup extends Component {
     this.near = near && nd < PICK_R + near.radius ? near : null; // 흰 고리(반지름 11)에 몸이 닿으면 "공격 = 획득"
   }
   // h가 이 아이템을 향해 공격했을 때
-  interact(h) {
+  interact(h) { const ok = this._interact(h); if (ok && this.item.group) this.game.groupTaken(this.item.group); return ok; } // group: 서재처럼 몇 개만 고를 수 있는 묶음
+  _interact(h) {
     const g = this.game, it = this.item, p = this.transform.position;
     if (this.lock > 0) return false;
     const price = it.price > 0 ? this._price() : 0;

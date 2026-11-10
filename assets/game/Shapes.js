@@ -25,6 +25,7 @@ const DRAW_MATRIX = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 // 방 바닥·벽·문. 문은 이웃 방이 있는 쪽에만 생기고, 전투 중이면 잠긴다(빨강). 문 위에 가려는 방 종류가 표시된다.
 const ROOM_COLORS = { start: "#5c8", normal: "#889", elite: "#fa4", treasure: "#fd3", shop: "#4d8", boss: "#f55" };
 const ROOM_ICONS = { start: "◆", normal: "·", elite: "!", treasure: "★", shop: "$", boss: "☠" };
+for (const [k, v] of Object.entries(SPECIAL_ROOMS)) { ROOM_COLORS[k] = v.color; ROOM_ICONS[k] = v.icon; } // 특수 방(가시·희생·도박·매복·서재)
 const FLOOR_TINTS = ["#2a2420", "#232a28", "#2a2329", "#292a22", "#222a2a", "#2a2222", "#28242c", "#2c2020"];
 const DOOR_W = 30;
 class ArenaRenderer extends Renderer {
@@ -74,12 +75,16 @@ class ArenaRenderer extends Renderer {
     if (!g.cur) return;
     for (const [d, room] of Object.entries(g.cur.nb)) { // 문
       const [x, y] = doorPos(d), horiz = d === "N" || d === "S";
-      ctx.fillStyle = locked ? "#c62828" : "#2e7d32";
+      ctx.fillStyle = locked ? "#c62828" : room.locked ? "#fdd835" : "#2e7d32"; // 노랑 = 열쇠가 필요한 문
       if (horiz) ctx.fillRect(x - DOOR_W / 2, y - 2.5, DOOR_W, 5); else ctx.fillRect(x - 2.5, y - DOOR_W / 2, 5, DOOR_W);
       if (!locked) { ctx.globalAlpha = 0.18 + 0.1 * Math.sin(performance.now() / 300); ctx.fillStyle = ROOM_COLORS[room.type]; ctx.beginPath(); ctx.arc(x, y, 16, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
       const ix = x + (d === "E" ? -14 : d === "W" ? 14 : 0), iy = y + (d === "N" ? -14 : d === "S" ? 14 : 0);
       ctx.save(); ctx.translate(ix, iy); ctx.scale(1, -1); ctx.fillStyle = ROOM_COLORS[room.type]; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(ROOM_ICONS[room.type], 0, 0); ctx.restore();
+      if (room.locked) { // 열쇠가 필요한 문: 작은 자물쇠
+        ctx.fillStyle = "#fdd835"; ctx.strokeStyle = "#fdd835"; ctx.lineWidth = 1.2; ctx.fillRect(x - 3.5, y - 3, 7, 5.5);
+        ctx.beginPath(); ctx.arc(x, y + 2.5, 2.6, Math.PI, 0); ctx.stroke(); ctx.fillStyle = "#5d4037"; ctx.fillRect(x - 0.6, y - 1.6, 1.2, 2.2);
+      }
     }
   }
 }
@@ -92,7 +97,7 @@ class MinimapRenderer extends Renderer {
     const m = camera.viewMatrix; ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
     const C = 9, seen = [], cp = camera.transform.position;
     const compass = g.heroes.some(h => h.stats.compass), special = g.heroes.some(h => h.stats.mapSpecial); // 나침반: 층 전체 공개 / 낡은 지도 조각: 특수 방만 공개
-    for (const r of g.map.list) if (compass || r.visited || Object.values(r.nb).some(o => o.visited) || (special && (r.type === "shop" || r.type === "treasure" || r.type === "boss"))) seen.push(r);
+    for (const r of g.map.list) if (compass || r.visited || Object.values(r.nb).some(o => o.visited) || (special && (r.type === "shop" || r.type === "treasure" || r.type === "boss" || SPECIAL_ROOMS[r.type]))) seen.push(r);
     if (!seen.length) return;
     const cells = seen.flatMap(r => r.cells.map(([dx, dy]) => [r.x + dx, r.y + dy]));
     const xs = cells.map(c => c[0]), ys = cells.map(c => c[1]);
@@ -110,6 +115,7 @@ class MinimapRenderer extends Renderer {
       const x = ox + (r.x - cx) * C, y = oy + (r.y - cy) * C;
       for (const [d, o] of Object.entries(r.nb)) if (seen.includes(o) && (d === "N" || d === "E")) { ctx.fillStyle = "#ffffff55"; ctx.fillRect(Math.min(x, ox + (o.x - cx) * C) - 1, Math.min(y, oy + (o.y - cy) * C) - 1, d === "E" ? C : 2, d === "N" ? C : 2); }
       if (r !== g.cur && r.visited && !r.cleared) { ctx.fillStyle = "#0008"; ctx.fillRect(x - 1, y - 1, 2, 2); }
+      if (r.locked) { ctx.fillStyle = "#fdd835"; ctx.fillRect(x - 1.5, y - 1.5, 3, 3); ctx.fillStyle = "#5d4037"; ctx.fillRect(x - 0.5, y - 0.5, 1, 1); } // 잠긴 방(열쇠 필요)
     }
     ctx.globalAlpha = 1;
   }
