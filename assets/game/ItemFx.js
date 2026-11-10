@@ -263,6 +263,17 @@ function rerollPickups(g) {
   if (n) { SFX.play("item"); for (const h of g.heroes) g.puff(h, ["#ffe082", "#fff"]); }
   return n > 0;
 }
+// 푸른 주사위: 현재 방 바닥의 픽업(코인·열쇠·하트·꾸러미·상자)을 무작위 픽업으로 바꾼다
+function rerollRoomPickups(g) {
+  const list = g.pickups.filter(pk => !pk.gameObject.isDestroyed && (pk.item.type === "coin" || pk.item.type === "key" || pk.item.type === "bundle" || pk.item.type === "chest" || (pk.item.type === "heart" && !(pk.item.price > 0)))); let n = 0;
+  for (const pk of list) {
+    const p = pk.transform.position, x = p.x, y = p.y; pk.gameObject.destroy(); n++;
+    const r = Math.random();
+    if (r < 0.40) g.spawnCoin(x, y, g.rollCoinValue(0)); else if (r < 0.60) g.spawnKey(x, y); else if (r < 0.78) g.spawnHeart(x, y); else if (r < 0.90) g.spawnBundle(x, y); else g.spawnChest(x, y);
+    g.fx.emit(x, y, { count: 6, colors: ["#4fc3f7", "#fff"], speed: [10, 40], life: [0.2, 0.4], size: [1, 1.6], fade: true });
+  }
+  return n > 0;
+}
 // 바닥의 동전→열쇠→하트→동전으로 바꾼다
 function convertPickups(g) {
   const list = g.pickups.filter(pk => !pk.gameObject.isDestroyed && (pk.item.type === "coin" || pk.item.type === "key" || (pk.item.type === "heart" && !(pk.item.price > 0)))); let n = 0;
