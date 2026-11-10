@@ -61,7 +61,8 @@ class Obstacle extends Component {
     g.obstacles = g.obstacles.filter(o => o !== this);
     g.fx.emit(p.x, p.y, { count: 10, colors: this.kind === "crate" ? ["#a47532", "#5a3d14"] : this.kind === "rock" ? ["#7b6a58", "#3e342a"] : ["#c0392b", "#ff8a65"], speed: [20, 70], life: [0.2, 0.45], size: [1, 2.2], fade: true });
     const cg = g.partySum("crateGold"); // 도토리: 상자·통을 부수면 코인 확정
-    if (this.kind === "crate" && Math.random() < 0.35) g.spawnCoin(p.x, p.y, 1 + Math.floor(Math.random() * 2));
+    if (this.kind === "crate" && Math.random() < ECON.crate.coin) g.spawnCoin(p.x, p.y, g.rollCoinValue(0));
+    else if (this.kind === "crate" && Math.random() < ECON.crate.key / (1 - ECON.crate.coin)) g.spawnKey(p.x, p.y);
     else if ((this.kind === "crate" || this.kind === "barrel") && cg > 0) g.spawnCoin(p.x, p.y, cg);
     this.gameObject.destroy();
     if (this.kind === "barrel") g.explode(p.x, p.y, 30, 5, 1, by);

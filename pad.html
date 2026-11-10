@@ -163,7 +163,7 @@ async function start() {
       if (d.t === "welcome") { color = d.color; draw(); }
       else if (d.t === "st") {
         $("hp").textContent = d.alive ? "♥".repeat(d.hp) + "♡".repeat(Math.max(0, d.maxHp - d.hp)) : "💀 보스를 쓰러뜨리면 부활";
-        $("score").textContent = `${d.floor}층 · ${d.weapon} · ${d.gold}G`;
+        $("score").textContent = `${d.floor}층 · ${d.weapon} · ${d.gold}G${d.keys > 0 ? " · 🔑" + d.keys : ""}`;
         actInfo = d.act || null; draw();
         const cnt = {}; (d.itemNames || []).forEach(n => cnt[n] = (cnt[n] || 0) + 1);
         $("items").textContent = (d.act ? "[액티브] " + d.act.name + "  " : "") + Object.entries(cnt).map(([n, c]) => c > 1 ? `${n}×${c}` : n).join(" · ");

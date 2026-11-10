@@ -22,9 +22,9 @@ const newStats = () => ({ speed: 1, atkSpeed: 1, dmg: 1, range: 1, knock: 1, das
   dashDmg: 0, dashCancel: false, heartBuff: 0, fullHpAtk: 0,
   coinDouble: 0, eliteGold: 0, interest: 0, crateGold: 0, autoCoin: false, firstHalf: false, shopExtra: 0 });
 const ITEM_TIERS = [null,
-  { name: "일반", price: 24, color: "#e8e8e8", weight: 5 },
-  { name: "희귀", price: 36, color: "#4fc3f7", weight: 3 },
-  { name: "영웅", price: 48, color: "#ce93d8", weight: 1.4 }];
+  { name: "일반", price: 10, color: "#e8e8e8", weight: 5 },
+  { name: "희귀", price: 15, color: "#4fc3f7", weight: 3 },
+  { name: "영웅", price: 20, color: "#ce93d8", weight: 1.4 }];
 
 const PASSIVES = {
   // ================= 일반 (12G) =================
@@ -135,4 +135,4 @@ const randomActiveId = (exclude = new Set()) => {
   return ids[0];
 };
 // 무기 가격은 등급(5단계)으로 고정
-const weaponPrice = w => [24, 36, 48, 64, 88][w.tier];
+const weaponPrice = w => [10, 15, 20, 27, 36][w.tier];

@@ -2,7 +2,7 @@
 // 적 정의 (데이터 기반). 새 적은 ENEMY_DEFS에 한 항목을 추가하고 ENEMY_POOL에 등장 층·가중치만 적으면 된다.
 //
 //  hp, speed, radius(크기), color, kind(모양: square|circle|diamond|tri|poly|star|cross), sides(poly/star 꼭짓점), touch(접촉 피해), resist(넉백 저항 0~1)
-//  gold: [최소,최대] 코인 드랍 (확률 goldChance)   onDeath: { spawn, count } 분열   pack: 한 번에 나오는 수   noDrop: 드랍 없음
+//  onDeath: { spawn, count } 분열   pack: 한 번에 나오는 수   (적은 골드를 떨어뜨리지 않는다 — 방 클리어 보상은 Game.clearRoom)
 //  특성: phasing(주기적으로 실체가 사라짐) | frontGuard(정면 공격 피해 75% 감소) | rage(체력 절반 이하에서 빨라짐)
 //
 //  ── 행동 ──────────────────────────────────────────────
@@ -47,7 +47,6 @@ const BALANCE = {
   dmgEveryFloors: 4,          // 몇 층마다 탄/접촉 피해 +1
   maxArms: 6,                 // 회전 탄막 줄기 수 상한
   maxEnemyProjectiles: 340,   // 화면 위 적 탄 최대 개수 (넘으면 더 안 쏜다: 성능·공정성)
-  coinRate: 1.0,              // 코인 드랍 확률 배율 (경제 조절: 가격은 Items.js ITEM_PRICE·weaponPrice)
   eliteHp: 3, eliteCountAdd: 1, eliteRate: 1.25, eliteSpeed: 1.1, eliteRadius: 1.35,
 };
 // ── 난이도 ─────────────────────────────────────────────────────────────
@@ -78,83 +77,83 @@ function calcScale(floor, np, elite = false, boss = false, diff = "normal") {
 
 const ENEMY_DEFS = {
   // ---------- 일반 적 (행동 모드를 번갈아 쓴다) ----------
-  grunt:    { name: "고블린", hp: 4, speed: 30, radius: 6, color: "#ef5350", kind: "square", touch: 1, gold: [1, 1], goldChance: 0.3,
+  grunt:    { name: "고블린", hp: 4, speed: 30, radius: 6, color: "#ef5350", kind: "square", touch: 1, 
               modes: [{ ai: "chase", dur: [2.5, 4] },
                       { ai: "strafe", keep: [42, 58], dur: [1.6, 2.4], attacks: [{ type: "charge", cd: 1.1, first: 0.4, windup: 0.45, dur: 0.28, speed: 135, range: 95 }] }] },
-  brute:    { name: "오우거", hp: 14, speed: 20, radius: 9, color: "#a1887f", kind: "square", touch: 2, resist: 0.35, gold: [1, 2], goldChance: 0.5,
+  brute:    { name: "오우거", hp: 14, speed: 20, radius: 9, color: "#a1887f", kind: "square", touch: 2, resist: 0.35, 
               modes: [{ ai: "chase", dur: [3, 5], attacks: [{ type: "slam", cd: 3.8, windup: 0.9, radius: 26, dmg: 2, range: 40 }] },
                       { ai: "hop", dur: [2.2, 3.2], attacks: [{ type: "leap", cd: 2.2, first: 0.6, windup: 0.55, radius: 28, dmg: 2, range: 160 }] }] },
-  runner:   { name: "박쥐", hp: 2, speed: 62, radius: 4, color: "#ffee58", kind: "circle", touch: 1, gold: [1, 1], goldChance: 0.25,
+  runner:   { name: "박쥐", hp: 2, speed: 62, radius: 4, color: "#ffee58", kind: "circle", touch: 1, 
               modes: [{ ai: "zigzag", dur: [1.8, 2.8] }, { ai: "flee", dur: [0.7, 1.1] }] },
-  swarmer:  { name: "벌레", hp: 1, speed: 44, radius: 3, color: "#9e9d24", kind: "circle", touch: 1, pack: 4, gold: [1, 1], goldChance: 0.08,
+  swarmer:  { name: "벌레", hp: 1, speed: 44, radius: 3, color: "#9e9d24", kind: "circle", touch: 1, pack: 4, 
               modes: [{ ai: "zigzag", dur: [1.5, 2.5] }, { ai: "wander", dur: [1, 1.6] }] },
-  slime:    { name: "슬라임", hp: 5, speed: 24, radius: 7, color: "#66bb6a", kind: "circle", touch: 1, gold: [1, 1], goldChance: 0.3, onDeath: { spawn: "slimelet", count: 2 },
+  slime:    { name: "슬라임", hp: 5, speed: 24, radius: 7, color: "#66bb6a", kind: "circle", touch: 1,  onDeath: { spawn: "slimelet", count: 2 },
               modes: [{ ai: "chase", dur: [2.5, 3.5] }, { ai: "hop", dur: [1.5, 2.2] }] },
-  slimelet: { name: "아기 슬라임", hp: 2, speed: 40, radius: 4, color: "#a5d6a7", kind: "circle", touch: 1, goldChance: 0,
+  slimelet: { name: "아기 슬라임", hp: 2, speed: 40, radius: 4, color: "#a5d6a7", kind: "circle", touch: 1, 
               modes: [{ ai: "chase", dur: [2, 3] }, { ai: "hop", dur: [1, 1.5] }] },
-  shooter:  { name: "궁수", hp: 3, speed: 24, radius: 5, color: "#4dd0e1", kind: "diamond", touch: 1, gold: [1, 2], goldChance: 0.4,
+  shooter:  { name: "궁수", hp: 3, speed: 24, radius: 5, color: "#4dd0e1", kind: "diamond", touch: 1, 
               modes: [{ ai: "kite", keep: [60, 90], dur: [2.5, 3.5], attacks: [{ type: "burst", cd: 2.2, rounds: 3, interval: 0.16, count: 1, speed: 100, dmg: 1, countScale: true }] },
                       { ai: "strafe", keep: [65, 85], dur: [1.8, 2.6], attacks: [{ type: "shoot", cd: 1.0, count: 1, speed: 110, dmg: 1 }] }] },
-  sniper:   { name: "저격수", hp: 3, speed: 20, radius: 4, color: "#90a4ae", kind: "diamond", touch: 1, gold: [2, 3], goldChance: 0.4,
+  sniper:   { name: "저격수", hp: 3, speed: 20, radius: 4, color: "#90a4ae", kind: "diamond", touch: 1, 
               modes: [{ ai: "kite", keep: [110, 150], dur: [2.5, 3.5], attacks: [{ type: "shoot", cd: 2.6, count: 1, speed: 185, dmg: 1 }] },
                       { ai: "flee", dur: [0.8, 1.2] }] },
-  charger:  { name: "멧돼지", hp: 7, speed: 28, radius: 7, color: "#ff8a65", kind: "tri", touch: 1, gold: [1, 2], goldChance: 0.4,
+  charger:  { name: "멧돼지", hp: 7, speed: 28, radius: 7, color: "#ff8a65", kind: "tri", touch: 1, 
               modes: [{ ai: "chase", dur: [2, 3.2], attacks: [{ type: "charge", cd: 2.6, windup: 0.55, dur: 0.45, speed: 175, chain: 2, range: 150 }] },
                       { ai: "strafe", keep: [60, 80], dur: [1.2, 1.8] }] },
-  spearman: { name: "창병", hp: 6, speed: 26, radius: 6, color: "#8d6e63", kind: "tri", touch: 1, gold: [1, 2], goldChance: 0.4,
+  spearman: { name: "창병", hp: 6, speed: 26, radius: 6, color: "#8d6e63", kind: "tri", touch: 1, 
               modes: [{ ai: "chase", dur: [2, 3], attacks: [{ type: "charge", cd: 2.2, windup: 0.4, dur: 0.25, speed: 160, range: 85 }] },
                       { ai: "strafe", keep: [50, 60], dur: [1.5, 2.2], attacks: [{ type: "charge", cd: 1.4, windup: 0.35, dur: 0.22, speed: 170, range: 75 }] }] },
-  spreader: { name: "마법사", hp: 5, speed: 20, radius: 6, color: "#ba68c8", kind: "star", sides: 5, touch: 1, gold: [1, 2], goldChance: 0.4,
+  spreader: { name: "마법사", hp: 5, speed: 20, radius: 6, color: "#ba68c8", kind: "star", sides: 5, touch: 1, 
               modes: [{ ai: "kite", keep: [70, 100], dur: [2.5, 3.5], attacks: [{ type: "shoot", cd: 2.2, count: 3, spread: 0.7, speed: 82, dmg: 1, countScale: true }] },
                       { ai: "strafe", keep: [75, 95], dur: [2, 3], attacks: [{ type: "burst", cd: 2.6, rounds: 2, interval: 0.3, count: 3, spread: 0.6, speed: 85, dmg: 1, countScale: true }] }] },
-  wisp:     { name: "도깨비불", hp: 3, speed: 34, radius: 4, color: "#80deea", kind: "circle", touch: 1, gold: [1, 2], goldChance: 0.35,
+  wisp:     { name: "도깨비불", hp: 3, speed: 34, radius: 4, color: "#80deea", kind: "circle", touch: 1, 
               modes: [{ ai: "zigzag", dur: [2, 3], attacks: [{ type: "shoot", cd: 2.4, count: 1, speed: 90, dmg: 1, homing: 1.6 }] },
                       { ai: "wander", dur: [1.5, 2.2], attacks: [{ type: "shoot", cd: 1.6, count: 1, speed: 80, dmg: 1, wave: [16, 5] }] }] },
-  ghost:    { name: "유령", hp: 6, speed: 24, radius: 6, color: "#cfd8dc", kind: "circle", touch: 1, phasing: true, gold: [1, 2], goldChance: 0.4,
+  ghost:    { name: "유령", hp: 6, speed: 24, radius: 6, color: "#cfd8dc", kind: "circle", touch: 1, phasing: true, 
               modes: [{ ai: "chase", dur: [2.5, 3.5] }, { ai: "wander", dur: [1.2, 2] }] },
-  bomber:   { name: "폭탄병", hp: 3, speed: 50, radius: 5, color: "#ff7043", kind: "circle", touch: 0, ai: "bomber", gold: [1, 1], goldChance: 0.3 },
-  tank:     { name: "골렘", hp: 16, speed: 18, radius: 10, color: "#8e24aa", kind: "square", touch: 2, resist: 0.3, gold: [2, 3], goldChance: 0.7,
+  bomber:   { name: "폭탄병", hp: 3, speed: 50, radius: 5, color: "#ff7043", kind: "circle", touch: 0, ai: "bomber",  },
+  tank:     { name: "골렘", hp: 16, speed: 18, radius: 10, color: "#8e24aa", kind: "square", touch: 2, resist: 0.3, 
               modes: [{ ai: "chase", dur: [3, 4.5], attacks: [{ type: "slam", cd: 3.5, windup: 0.8, radius: 30, dmg: 2, range: 55 }] },
                       { ai: "hop", dur: [2, 2.8], attacks: [{ type: "leap", cd: 2.6, first: 0.5, windup: 0.65, radius: 32, dmg: 2, range: 170 }] }] },
-  shieldbearer: { name: "방패병", hp: 10, speed: 20, radius: 7, color: "#78909c", kind: "square", touch: 1, frontGuard: true, gold: [1, 2], goldChance: 0.5,
+  shieldbearer: { name: "방패병", hp: 10, speed: 20, radius: 7, color: "#78909c", kind: "square", touch: 1, frontGuard: true, 
               modes: [{ ai: "chase", dur: [2.5, 3.5] }, { ai: "strafe", keep: [30, 40], dur: [1.5, 2.2] }] },
-  spinner:  { name: "회전포", hp: 9, speed: 12, radius: 8, color: "#26a69a", kind: "poly", sides: 8, touch: 1, gold: [2, 3], goldChance: 0.6,
+  spinner:  { name: "회전포", hp: 9, speed: 12, radius: 8, color: "#26a69a", kind: "poly", sides: 8, touch: 1, 
               modes: [{ ai: "chase", dur: [3, 4], attacks: [{ type: "spiral", cd: 4, dur: 2.2, rate: 12, step: 0.5, arms: 2, speed: 75, dmg: 1, countScale: true }] },
                       { ai: "wander", dur: [2, 3], attacks: [{ type: "ring", cd: 2.2, count: 8, speed: 65, dmg: 1, countScale: true, bounce: 1 }] }] },
-  healer:   { name: "치유사", hp: 5, speed: 20, radius: 5, color: "#66bb6a", kind: "cross", touch: 1, gold: [1, 2], goldChance: 0.5,
+  healer:   { name: "치유사", hp: 5, speed: 20, radius: 5, color: "#66bb6a", kind: "cross", touch: 1, 
               modes: [{ ai: "kite", keep: [90, 130], dur: [3, 4], attacks: [{ type: "heal", cd: 3.5, radius: 70, pct: 0.25 }] },
                       { ai: "flee", dur: [1, 1.5], attacks: [{ type: "heal", cd: 3, radius: 70, pct: 0.25 }] }] },
-  summoner: { name: "소환사", hp: 6, speed: 18, radius: 6, color: "#7e57c2", kind: "diamond", touch: 1, gold: [2, 3], goldChance: 0.6,
+  summoner: { name: "소환사", hp: 6, speed: 18, radius: 6, color: "#7e57c2", kind: "diamond", touch: 1, 
               modes: [{ ai: "kite", keep: [80, 110], dur: [3, 4], attacks: [{ type: "summon", cd: 6, spawn: "runner", count: 2, max: 5, countScale: true }] },
                       { ai: "strafe", keep: [85, 105], dur: [2, 3], attacks: [{ type: "shoot", cd: 1.6, count: 2, spread: 0.4, speed: 90, dmg: 1 }] }] },
-  turret:   { name: "포탑", hp: 8, speed: 0, radius: 6, color: "#fbc02d", kind: "poly", sides: 4, touch: 0, gold: [1, 2], goldChance: 0.4,
+  turret:   { name: "포탑", hp: 8, speed: 0, radius: 6, color: "#fbc02d", kind: "poly", sides: 4, touch: 0, 
               modes: [{ ai: "static", dur: [3, 4], attacks: [{ type: "ring", cd: 2.4, count: 8, speed: 70, dmg: 1, countScale: true }] },
                       { ai: "static", dur: [3, 4], attacks: [{ type: "burst", cd: 1.8, rounds: 4, interval: 0.14, count: 1, speed: 105, dmg: 1 }] }] },
   // --- 돌진·근접·기동 계열 ---
-  berserker:{ name: "광전사", hp: 8, speed: 36, radius: 7, color: "#c62828", kind: "star", sides: 4, touch: 1, rage: true, gold: [1, 2], goldChance: 0.45,
+  berserker:{ name: "광전사", hp: 8, speed: 36, radius: 7, color: "#c62828", kind: "star", sides: 4, touch: 1, rage: true, 
               modes: [{ ai: "chase", dur: [2.2, 3.2], attacks: [{ type: "charge", cd: 1.8, windup: 0.35, dur: 0.3, speed: 190, chain: 2, range: 120 }] },
                       { ai: "strafe", keep: [35, 50], dur: [1.2, 1.8] }] },
-  lancer:   { name: "창기병", hp: 9, speed: 26, radius: 7, color: "#6d4c41", kind: "tri", touch: 1, gold: [2, 3], goldChance: 0.5,
+  lancer:   { name: "창기병", hp: 9, speed: 26, radius: 7, color: "#6d4c41", kind: "tri", touch: 1, 
               modes: [{ ai: "kite", keep: [90, 120], dur: [2.2, 3.2], attacks: [{ type: "charge", cd: 2.4, windup: 0.8, dur: 0.55, speed: 240, range: 200 }] },
                       { ai: "strafe", keep: [80, 100], dur: [1.5, 2.2] }] },
-  jumper:   { name: "개구리", hp: 7, speed: 30, radius: 6, color: "#7cb342", kind: "circle", touch: 1, gold: [1, 2], goldChance: 0.4,
+  jumper:   { name: "개구리", hp: 7, speed: 30, radius: 6, color: "#7cb342", kind: "circle", touch: 1, 
               modes: [{ ai: "hop", dur: [2.5, 3.5], attacks: [{ type: "leap", cd: 1.8, first: 0.6, windup: 0.5, radius: 24, dmg: 1, range: 150 }] },
                       { ai: "wander", dur: [1, 1.6] }] },
-  biter:    { name: "늑대", hp: 5, speed: 56, radius: 5, color: "#9e9e9e", kind: "tri", touch: 1, gold: [1, 1], goldChance: 0.3,
+  biter:    { name: "늑대", hp: 5, speed: 56, radius: 5, color: "#9e9e9e", kind: "tri", touch: 1, 
               modes: [{ ai: "chase", dur: [1.6, 2.4] }, { ai: "flee", dur: [0.7, 1.1] }] },
-  spinblade:{ name: "회전톱", hp: 10, speed: 70, radius: 7, color: "#b0bec5", kind: "poly", sides: 8, touch: 2, ai: "ricochet", resist: 0.3, gold: [2, 3], goldChance: 0.6 },
-  bouncer:  { name: "튕김포", hp: 6, speed: 22, radius: 6, color: "#f48fb1", kind: "star", sides: 6, touch: 1, gold: [1, 2], goldChance: 0.45,
+  spinblade:{ name: "회전톱", hp: 10, speed: 70, radius: 7, color: "#b0bec5", kind: "poly", sides: 8, touch: 2, ai: "ricochet", resist: 0.3,  },
+  bouncer:  { name: "튕김포", hp: 6, speed: 22, radius: 6, color: "#f48fb1", kind: "star", sides: 6, touch: 1, 
               modes: [{ ai: "strafe", keep: [70, 90], dur: [2.4, 3.4], attacks: [{ type: "shoot", cd: 2, count: 2, spread: 0.5, speed: 95, dmg: 1, bounce: 2 }] },
                       { ai: "kite", keep: [80, 110], dur: [1.6, 2.4], attacks: [{ type: "burst", cd: 2.4, rounds: 3, interval: 0.18, count: 1, speed: 100, dmg: 1, bounce: 2 }] }] },
-  mortar:   { name: "박격포", hp: 6, speed: 20, radius: 6, color: "#ffb74d", kind: "poly", sides: 6, touch: 1, gold: [1, 2], goldChance: 0.45,
+  mortar:   { name: "박격포", hp: 6, speed: 20, radius: 6, color: "#ffb74d", kind: "poly", sides: 6, touch: 1, 
               modes: [{ ai: "kite", keep: [110, 150], dur: [3, 4], attacks: [{ type: "bombard", cd: 3, count: 2, radius: 22, delay: 1, dmg: 2 }] },
                       { ai: "flee", dur: [0.8, 1.2] }] },
-  assassin: { name: "암살자", hp: 5, speed: 40, radius: 5, color: "#7e57c2", kind: "diamond", touch: 1, gold: [2, 3], goldChance: 0.5,
+  assassin: { name: "암살자", hp: 5, speed: 40, radius: 5, color: "#7e57c2", kind: "diamond", touch: 1, 
               modes: [{ ai: "wander", dur: [1.2, 1.8], attacks: [{ type: "teleport", cd: 3.2, first: 0.8, near: 42 }] },
                       { ai: "chase", dur: [1.4, 2], attacks: [{ type: "charge", cd: 1.2, windup: 0.3, dur: 0.2, speed: 210, range: 80 }] }] },
   // --- 보스가 만드는 것들 ---
-  shieldorb:{ name: "보호 구체", hp: 3, speed: 0, radius: 4.5, color: "#ce93d8", kind: "circle", touch: 1, ai: "orbit", noDrop: true },
-  crystal:  { name: "수정", hp: 14, speed: 0, radius: 8, color: "#4db6ac", kind: "diamond", touch: 0, ai: "static", resist: 1, noDrop: true,
+  shieldorb:{ name: "보호 구체", hp: 3, speed: 0, radius: 4.5, color: "#ce93d8", kind: "circle", touch: 1, ai: "orbit",  },
+  crystal:  { name: "수정", hp: 14, speed: 0, radius: 8, color: "#4db6ac", kind: "diamond", touch: 0, ai: "static", resist: 1, 
               attacks: [{ type: "ring", cd: 4.2, first: 2.5, count: 6, speed: 55, dmg: 1, bounce: 1 }] },
 
   // ---------- 보스 (층마다 정해진 2종 중 하나가 나온다: BOSS_POOLS. 8층은 마왕 고정) ----------
@@ -723,15 +722,6 @@ class Enemy extends Component {
     SFX.play(this.boss ? "boom" : "die");
     if (this.boss) for (const e of g.enemies) if (e !== this && !e.dead && (e.parent === this || e.guardOf === this)) e.die(null, true); // 보스가 쓰러지면 졸개도 사라진다
     if (def.onDeath && !quiet) for (let i = 0; i < def.onDeath.count; i++) { const a = i * 3.14 + Math.random(); g.spawnEnemy(def.onDeath.spawn, p.x + Math.cos(a) * 8, p.y + Math.sin(a) * 8, { delay: 0.2 }); }
-    const bonus = g.partySum("coinDrop"); // 골드 관련 아이템은 파티 전체에 적용
-    if (!this.boss && !quiet && !def.noDrop && (def.gold || bonus > 0) && (this.elite || Math.random() < ((def.goldChance ?? 0) + bonus) * BALANCE.coinRate)) {
-      const [lo, hi] = def.gold || [1, 1];
-      let n = (lo + Math.floor(Math.random() * (hi - lo + 1))) * (this.elite ? 2 : 1);
-      if (Math.random() < g.partySum("coinDouble")) n *= 2; // 네잎 클로버
-      if (this.elite) n += g.partySum("eliteGold"); // 황금 이빨
-      if (g.partyAny("autoCoin")) { g.addGold(n); g.fx.emit(p.x, p.y, { count: 4, colors: ["#ffca28", "#fff"], speed: [10, 40], life: [0.2, 0.4], size: [1, 1.6], fade: true }); SFX.play("coin"); } // 도굴꾼 주머니: 바로 팀 골드로
-      else g.spawnCoin(p.x, p.y, n);
-    }
     if (by) by.kills++;
     Events.emit("enemy.killed", { enemy: this, by });
     this.gameObject.destroy();
