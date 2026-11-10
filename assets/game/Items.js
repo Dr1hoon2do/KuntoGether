@@ -1,6 +1,6 @@
 // ============================================================================
 // 패시브 아이템 / 액티브 아이템  (이벤트 훅 + 공격 수식 파이프라인)
-// 등급(tier) 3단계: 1=일반 2=희귀 3=영웅 (가격은 ITEM_TIERS). 새 아이템은 아래 P(...) 한 줄이면 보물방·상점·보스 보상에 자동으로 섞인다.
+// 아이템에는 등급 구분이 없다 (가격 15G 고정, 확률 균등). P()의 두 번째 인자는 형태 변환 우선순위 기본값. 새 아이템은 아래 P(...) 한 줄이면 보물방·상점·보스 보상에 자동으로 섞인다.
 //
 // ── 아이템 정의 형식  P(id, tier, 아이콘, 이름, 설명, [태그], 스펙)  ───────────────────────────────
 //   s      : 스탯 변경. { dmg: 0.1 } 더하기 / { "dmg*": 1.2 } 곱하기 / { pierce: true } 켜기      (스탯 목록은 newStats)
@@ -57,10 +57,8 @@ const newStats = () => ({ speed: 1, atkSpeed: 1, dmg: 1, range: 1, knock: 1, das
   cloneAhead: 0, cloneBehind: 0, twin: 0, blades: 0, ludo: 0, relay: 0, delayEcho: 0, curve: 0, charge: 0, streakDmg: 0, roomRamp: 0, richDmg: 0, keyDmg: 0,
   demolish: false, bulletTime: false, bulletSize: 1, noSlow: false, dashFirst: 0, alt: 0, trailWalk: false, pulse: false, quack: 0, starProc: 0, critBleed: false, teamDmg: 0,
   coinDouble: 0, interest: 0, crateGold: 0, firstHalf: false, shopExtra: 0, coinLuck: 0, chestLuck: 0, rewardLuck: 0 });
-const ITEM_TIERS = [null,
-  { name: "일반", price: 10, color: "#e8e8e8", weight: 5 },
-  { name: "희귀", price: 15, color: "#4fc3f7", weight: 3 },
-  { name: "영웅", price: 20, color: "#ce93d8", weight: 1.4 }];
+// 아이템(패시브·액티브)에는 등급이 없다: 가격 15G 고정, 나올 확률 모두 같음. (tier 숫자는 형태 변환 우선순위 기본값으로만 쓰인다)
+const ITEM_TIERS = [null, ...[1, 2, 3].map(() => ({ name: "", price: 15, color: "#e8e8e8", weight: 1 }))];
 
 // ---------------------------------------------------------------------------
 // 공통 도우미 (할당을 최소화: 모듈 안의 재사용 버퍼)
@@ -427,12 +425,10 @@ const ACTIVES = {
                  for (const pr of g.projs) { if (pr.fromPlayer || pr.gameObject.isDestroyed || pr.orbit) continue; pr.owner = h; pr.reflect(h, dir); n++; }
                  g.cam.shake(2, 0.2); SFX.play("clear"); return n > 0; } },
   // ── 주사위 · 방/아이템 조작 ──
-  d1:        { tier: 1, icon: "🎲", name: "작은 주사위", kind: "charge", max: 2, desc: "가진 패시브 한 개를 같은 등급의 다른 아이템으로 바꾼다",
-               use(h, g) { if (!rerollItems(h, "one")) return false; g.puff(h, ["#ce93d8", "#fff"]); SFX.play("item"); return true; } },
-  d6:        { tier: 2, icon: "🎲", name: "D6", kind: "charge", max: 3, desc: "가진 패시브를 모두 같은 등급의 다른 아이템으로 바꾼다",
-               use(h, g) { if (!rerollItems(h, "same")) return false; g.puff(h, ["#ce93d8", "#fff"]); g.cam.shake(2, 0.2); SFX.play("item"); return true; } },
-  d20:       { tier: 3, icon: "🔮", name: "D20", kind: "kill", per: 18, max: 1, desc: "가진 패시브를 모두 (등급 무관) 무작위 아이템으로 바꾼다",
-               use(h, g) { if (!rerollItems(h, "any")) return false; g.puff(h, ["#ffd54f", "#fff"]); g.cam.shake(3, 0.3); SFX.play("item"); return true; } },
+  d1:        { tier: 1, icon: "🎲", name: "작은 주사위", kind: "charge", max: 2, desc: "가장 가까운 바닥 아이템 하나를 다른 것으로 바꾼다",
+               use(h, g) { if (!rerollNearest(h, g)) return false; g.puff(h, ["#ce93d8", "#fff"]); SFX.play("item"); return true; } },
+  d6:        { tier: 2, icon: "🎲", name: "D6", kind: "charge", max: 3, desc: "가진 패시브를 모두 무작위 다른 아이템으로 바꾼다",
+               use(h, g) { if (!rerollItems(h)) return false; g.puff(h, ["#ce93d8", "#fff"]); g.cam.shake(2, 0.2); SFX.play("item"); return true; } },
   tarot:     { tier: 1, icon: "🃏", name: "점쟁이 카드", kind: "cooldown", cd: 25, desc: "바닥(상점 포함)의 아이템·무기를 다시 뽑는다",
                use(h, g) { return rerollPickups(g); } },
   alchemy:   { tier: 2, icon: "⚗️", name: "연금술 가루", kind: "charge", max: 3, desc: "바닥의 동전→열쇠→하트→동전으로 바꾼다",
@@ -473,7 +469,7 @@ const CHARGED = { charge: 1, kill: 1, dmg: 1, floor: 1 }; // 충전 횟수로 �
 const activeNote = def => def.kind === "charge" ? `방 클리어마다 충전 (최대 ${def.max})` : def.kind === "kill" ? `적 ${def.per}마리 처치마다 충전 (최대 ${def.max})` : def.kind === "dmg" ? `피해 ${def.per}마다 충전 (최대 ${def.max})` : def.kind === "floor" ? `층마다 ${def.max}회` : `쿨타임 ${def.cd}초`;
 const activeLabel = a => a ? `${ACTIVES[a.id].icon}${ACTIVES[a.id].name} ${CHARGED[ACTIVES[a.id].kind] ? `${a.charge}/${ACTIVES[a.id].max}` : a.cdLeft > 0 ? Math.ceil(a.cdLeft) + "초" : "준비"}` : "";
 
-// 등급이 높을수록 덜 나온다. exclude: 이미 뽑은 id 집합 (모자라면 중복 허용)
+// 모든 아이템 확률 균등. exclude: 이미 뽑은 id 집합 (모자라면 중복 허용)
 const randomItemId = (exclude = new Set()) => {
   let ids = Object.keys(PASSIVES).filter(id => !exclude.has(id));
   if (!ids.length) ids = Object.keys(PASSIVES);

@@ -282,7 +282,7 @@ class Game extends Component {
     for (let i = 0; i < np; i++) this._makePickup({ ...this._itemSlot(takenP, takenA, 0.2), price: 0, x: pos[i].x, y: pos[i].y });
     for (let i = 0; i < np; i++) this.spawnWeaponPickup(pos[np + i].x, pos[np + i].y, randomWeapon(this.floorNum + 4));
   }
-  // 상점: (1~3) + 인원수x2 개의 품목. 하트(4G)가 나오면 인원수만큼 살 수 있다. 가격은 등급으로 고정(일반 10 / 희귀 15 / 영웅 20).
+  // 상점: (1~3) + 인원수x2 개의 품목. 하트(4G)가 나오면 인원수만큼 살 수 있다. 가격: 아이템 15G 고정.
   _stockShop(np) {
     const n = Math.min(30, 1 + Math.floor(Math.random() * 3) + np * 2 + 2 * this.partySum("shopExtra")), takenP = this._heldItems(), takenA = this._heldActives();
     const list = [];

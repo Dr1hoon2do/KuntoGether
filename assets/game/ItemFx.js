@@ -212,15 +212,27 @@ function fxTick(h, dt) {
 // ============================================================================
 // 액티브 아이템용 방·아이템 조작
 // ============================================================================
-// 패시브 다시 뽑기. mode: "same" 같은 등급으로 / "any" 등급 무관 / "one" 한 개만 같은 등급으로
-function rerollItems(h, mode) {
+// 패시브 다시 뽑기: 가진 패시브를 전부 무작위 다른 아이템으로 (등급 없음)
+function rerollItems(h) {
   const old = h.items.slice(); if (!old.length) return false;
   const held = new Set(old); for (const o of h.game.heroes) if (o !== h) for (const id of o.items) held.add(id);
-  const pick = tier => { const ids = Object.keys(PASSIVES).filter(id => PASSIVES[id].tier === tier && !held.has(id)); if (!ids.length) return null; const id = ids[Math.floor(Math.random() * ids.length)]; held.add(id); return id; };
-  const list = old.slice();
-  if (mode === "one") { const i = Math.floor(Math.random() * list.length), id = pick(PASSIVES[list[i]].tier); if (id) list[i] = id; }
-  else for (let i = 0; i < list.length; i++) { const id = mode === "any" ? (() => { const x = randomItemId(held); held.add(x); return x; })() : pick(PASSIVES[list[i]].tier); if (id) list[i] = id; }
+  const list = old.map(() => { const x = randomItemId(held); held.add(x); return x; });
   const hp = h.hp; h.clearItems(); for (const id of list) h.giveItem(id); syncFx(h); h.hp = Math.max(1, Math.min(h.maxHp, hp)); return true;
+}
+// 작은 주사위: 가장 가까운 바닥 아이템(패시브·액티브·무기) 하나를 다른 것으로 (사거리 90)
+function rerollNearest(h, g) {
+  const p = h.transform.position; let best = null, bd = 90;
+  for (const pk of g.pickups) {
+    if (pk.gameObject.isDestroyed) continue; const t = pk.item.type; if (t !== "item" && t !== "active" && t !== "weapon") continue;
+    const q = pk.transform.position, d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = pk; }
+  }
+  if (!best) return false;
+  const it = best.item;
+  if (it.type === "item") { const id = randomItemId(g._heldItems()); it.id = id; if (it.price > 0) it.price = PASSIVES[id].price; }
+  else if (it.type === "active") { const id = randomActiveId(g._heldActives()); it.id = id; it.state = null; if (it.price > 0) it.price = ACTIVES[id].price; }
+  else { it.weapon = randomWeapon(g.floorNum + 2); if (it.price > 0) it.price = weaponPrice(it.weapon); }
+  const q = best.transform.position; g.fx.emit(q.x, q.y, { count: 8, colors: ["#ce93d8", "#fff"], speed: [10, 40], life: [0.2, 0.4], size: [1, 1.6], fade: true });
+  return true;
 }
 // 방 한 번 더 돌기: 클리어한 일반·엘리트 방의 적이 다시 나타난다 (클리어하면 보상도 다시). 방마다 한 번
 function replayRoom(g) {

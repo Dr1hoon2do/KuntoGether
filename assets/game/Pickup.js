@@ -100,7 +100,7 @@ class Pickup extends Component {
       if (isItem) {
         this._label(ctx, def.icon, -bob, "#fff", 9);
         this._label(ctx, def.name, -14, "#fff", 5.5);
-        this._label(ctx, `${isAct ? "액티브 · " : ""}${ITEM_TIERS[def.tier].name}`, -20.5, color, 4.4);
+        if (isAct) this._label(ctx, "액티브", -20.5, "#ffd54f", 4.4);
         if (this.near) this._label(ctx, def.desc, -27, "#cfd8dc", 4.6);
         if (this.near && isAct) this._label(ctx, activeNote(def), -32, "#90a4ae", 4.2);
       } else {
