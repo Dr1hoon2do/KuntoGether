@@ -15,7 +15,7 @@ class Hero extends Component {
     this.kx = 0; this.ky = 0; this.radius = 6; this.keyboard = false;
   }
   resetRun() { // 새 게임을 시작할 때 초기화 (닉네임·pid는 유지)
-    const php = this.game.diffProfile().playerHp; this.maxHp = php; this.hp = php; this.kills = 0; this.items = []; this.stats = newStats(); this.active = null; this.moveT = 0; this.moveMul = 1;
+    const php = this.game.diffProfile().playerHp; this.maxHp = php; this.hp = php; this.maxHpTrade = 0; this.kills = 0; this.items = []; this.stats = newStats(); this.active = null; this.moveT = 0; this.moveMul = 1;
     this.weapon = { id: "sword", tier: 0 }; this.leechN = 0; this.regenT = 0; this.echoes = [];
     this.roomT = 99; this.hitThisRoom = false; this.heartBuffOn = false; this.dashAt = -1e9; this.moving = false; this.dashHit = new Set();
     // 아이템 시스템 상태 (Items.js): 이벤트 훅 · 형태 변환 · 꾸미기 · 태그/세트/짝 · 동료 · 보호막 · 임시 버프
@@ -73,7 +73,7 @@ class Hero extends Component {
   addGold(n) { return this.game.addGold(n); }
   giveItem(id) { this.items.push(id); PASSIVES[id].apply(this); this._aw = null; if (typeof syncFx === "function" && this.gameObject) syncFx(this); }
   clearItems() { // 아이템 효과를 모두 걷어낸다 (주사위로 다시 뽑을 때). 체력 기본값은 난이도에 따른다
-    const php = this.game.diffProfile().playerHp; this.items = []; this.stats = newStats(); this.maxHp = php; this.hp = Math.min(this.hp, php);
+    const php = this.game.diffProfile().playerHp; this.items = []; this.stats = newStats(); this.maxHp = Math.max(2, php - (this.maxHpTrade || 0)); this.hp = Math.min(this.hp, this.maxHp);
     this.hooks = {}; this.convs = []; this.convTo = {}; this.cos = {}; this.tagN = {}; this.sets = {}; this.syn = {}; this.clearFamiliars(); this.shield = 0; this._aw = null;
   }
   on(evt, fn) { (this.hooks[evt] || (this.hooks[evt] = [])).push(fn); }   // 훅 등록 (Items.js의 on)

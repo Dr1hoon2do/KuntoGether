@@ -153,10 +153,10 @@ class Pickup extends Component {
     const price = it.price > 0 ? this._price() : 0;
     if (it.type === "heart" && h.hp >= h.maxHp) { this._deny(h); return false; }
     if (it.price > 0 && g.gold < price) { this._deny(h); return false; }
-    const hpc = it.hpPrice > 0 ? it.hpPrice : 0; // 악마 상점: 골드 대신 체력으로 산다 (체력이 값보다 많아야 한다 — 사다가 죽지는 않는다)
-    if (hpc && h.hp <= hpc) { this._deny(h); return false; }
+    const hpc = it.hpPrice > 0 ? it.hpPrice : 0; // 악마 상점: 골드 대신 '최대 체력'을 내고 산다 (최대 체력이 2 아래로는 안 내려가고, 사다가 죽지는 않는다)
+    if (hpc && h.maxHp - hpc < 2) { this._deny(h); return false; }
     if (it.price > 0) { g.gold -= price; if (g.cur) g.cur.shopUsed = true; } // 골드는 팀 공유
-    if (hpc) { h.hp -= hpc; h.draw.flash = 0.1; h.hurtT = 3; SFX.play("hurt"); g.fx.emit(h.transform.position.x, h.transform.position.y, { count: 8, colors: ["#b71c1c", "#ef5350"], speed: [20, 60], life: [0.3, 0.5], size: [1, 2], fade: true }); }
+    if (hpc) { h.maxHp -= hpc; h.maxHpTrade = (h.maxHpTrade || 0) + hpc; h.hp = Math.min(h.hp, h.maxHp); h.draw.flash = 0.1; h.hurtT = 3; SFX.play("hurt"); g.fx.emit(h.transform.position.x, h.transform.position.y, { count: 8, colors: ["#b71c1c", "#ef5350"], speed: [20, 60], life: [0.3, 0.5], size: [1, 2], fade: true }); }
     if (it.type === "trade") { // 1 체력 → 골드/열쇠
       if (it.give.gold) { g.addGold(it.give.gold); g.fire?.("coinPickup", h, it.give.gold); } if (it.give.keys) { g.addKey(it.give.keys); g.fire?.("keyPickup", h, it.give.keys); }
       SFX.play("coin"); if (--it.stock <= 0) this.gameObject.destroy(); return true;
