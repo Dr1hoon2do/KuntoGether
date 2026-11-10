@@ -298,6 +298,7 @@ class Enemy extends Component {
     this.spawnDelay = opts.delay ?? 0.7; this.kx = 0; this.ky = 0; this.t = Math.random() * 6;
     this.dead = false; this.busy = null; this.fuse = 0; this.face = 0; this.lift = 0;
     this.burn = null; this.slowT = 0; this.slowMul = 1; this.stunT = 0;       // 상태이상 (아이템 효과)
+    this.frz = 0; this.poi = null; this.bld = null; this.shk = 0; this.rxCd = 0;  // 빙결 · 중독 · 출혈(받는 피해 +25%) · 감전 표시 · 반응 쿨다운
     this.invuln = false; this.shieldKind = ""; this.guardT = 0; this.crashT = 0; this.crashStun = 0; this.ethereal = false; this.alpha = 1; this.phT = Math.random() * 4; // 무적/보호막/유령
     this.strafeDir = Math.random() < 0.5 ? 1 : -1; this.strafeT = 0; this.wanderT = 0; this.wp = null; this.rv = null; this.raged = false;
     this.ai = def.ai || "chase"; this.keep = def.keep || [60, 90]; this.atk = []; this.pendingEnter = null; this.modeIdx = -1; this.modeT = 99; this.phaseIdx = -1;
@@ -332,11 +333,44 @@ class Enemy extends Component {
   lateUpdate() { if (this.col) this.col.sync(); }
   _dm(n) { return Math.max(1, Math.min(n + this.sc.dmgAdd, this.sc.dmgCap)); } // 층 보정 + 난이도 상한이 반영된 적의 피해
   _count(d, key = "count") { return Math.max(1, Math.round((d[key] + (d.countScale ? this.sc.countAdd : 0)) * this.sc.countMul)); } // 층·인원 보너스 + 난이도 배율
-  // 아이템 효과(화상·둔화·기절). 보스는 기절 면역.
-  applyStatus(stats, by) {
-    if (stats.burn > 0) this.burn = { t: 3, dps: 2 * stats.burn, by, tick: 0.5 };
-    if (stats.slow > 0) { this.slowT = 2.5; this.slowMul = 0.5; }
-    if (stats.stunChance > 0 && !this.boss && Math.random() < stats.stunChance) { this.stunT = 0.8; this._cancelBusy(); }
+  // 아이템 효과(화상·둔화·빙결·중독·감전·출혈·기절). 보스는 기절·빙결 면역(빙결은 둔화로 대체).
+  //   stats.burn = 화상 단계(항상 적용), burnP/freeze/poison/shock/bleed = 맞힐 때 적용 확률
+  applyStatus(st, by) {
+    if (st.burn > 0) this.addStatus("burn", st.burn, by);
+    if (st.burnP > 0 && Math.random() < st.burnP) this.addStatus("burn", 1, by);
+    if (st.slow > 0) this.addStatus("chill", 1, by);
+    if (st.freeze > 0 && Math.random() < st.freeze) this.addStatus("freeze", 1, by);
+    if (st.poison > 0 && Math.random() < st.poison) this.addStatus("poison", 1, by);
+    if (st.shock > 0 && Math.random() < st.shock) this.addStatus("shock", 1, by);
+    if (st.bleed > 0 && Math.random() < st.bleed) this.addStatus("bleed", 1, by);
+    if (st.stunChance > 0 && !this.boss && Math.random() < st.stunChance) { this.stunT = 0.8; this._cancelBusy(); }
+  }
+  // 상태 하나를 건다. 이미 걸린 다른 상태와 만나면 반응이 일어난다 (rxCd로 연속 반응 방지):
+  //   화상 x (빙결/둔화) = 증기 폭발 · 화상 x 중독 = 독불(독 번짐 + 폭발) · 감전 x (빙결/둔화) = 초전도(번개가 더 멀리, 더 세게)
+  addStatus(kind, lv, by) {
+    const sets = by && by.sets || {}, syn = by && by.syn || {}, chilled = this.frz > 0 || this.slowT > 0;
+    if (kind === "burn") {
+      const was = this.burn; this.burn = { t: 3, dps: 2 * lv * (sets.fire ? 1.3 : 1), by, tick: 0.5 };
+      if (chilled) this._react("steam", by); else if (this.poi) this._react("toxic", by);
+    } else if (kind === "chill") {
+      this.slowT = 2.5; this.slowMul = 0.5; if (this.burn) this._react("steam", by);
+    } else if (kind === "freeze") {
+      if (this.boss) { this.slowT = Math.max(this.slowT, 1.5); this.slowMul = 0.6; }
+      else { if (this.frz <= 0) this._cancelBusy(); this.frz = sets.ice ? 1.8 : 1.2; }
+      if (this.burn) this._react("steam", by);
+    } else if (kind === "poison") {
+      this.poi = { t: 4, dps: 1.4 * lv * (sets.poison ? 1.5 : 1), by, tick: 0.5 }; if (this.burn) this._react("toxic", by);
+    } else if (kind === "shock") {
+      this.shk = 0.4; const sup = chilled; if (sup) this._react("super", by);
+      else itemsArc(this.game, this, by, 2 + (sets.electric ? 2 : 0), 2 * (by ? by.stats.dmg : 1));
+    } else if (kind === "bleed") this.bld = { t: 4, by };
+  }
+  _react(kind, by) {
+    if (this.rxCd > 0 || this.dead) return; this.rxCd = 0.6;
+    const g = this.game, p = this.transform.position, d = by && by.stats ? by.stats.dmg : 1, syn = by && by.syn || {};
+    if (kind === "steam") { this.frz = 0; this.slowT = 0; this.burn = null; itemsAoe(g, p.x, p.y, 30, 5 * d * (syn.steam ? 1.6 : 1), by, ["#eceff1", "#b3e5fc"]); }
+    else if (kind === "toxic") { this.burn = null; itemsAoe(g, p.x, p.y, 34, 3.5 * d, by, ["#9ccc65", "#ffee58"], e => { if (e !== this) e.addStatus("poison", 1, by); }); }
+    else if (kind === "super") { this.frz = 0; this.slowT = 0; itemsArc(g, this, by, 5, 3.5 * d * (syn.supercon ? 2 : 1)); }
   }
   // 탄 옵션(튕김·유도·물결) 묶음
   _bopts(d) { const o = {}; if (d.bounce) o.bounces = d.bounce; if (d.homing) o.homing = d.homing; if (d.wave) o.wave = d.wave; return o; }
@@ -387,7 +421,11 @@ class Enemy extends Component {
     ctx.fill();
     if (this.def.frontGuard) { ctx.strokeStyle = "#e0e0e0"; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.arc(0, 0, rad + 2, this.face - 0.9, this.face + 0.9); ctx.stroke(); }
     if (this.burn) { ctx.strokeStyle = "#ff6d00"; ctx.lineWidth = 1.6; ctx.stroke(); }
+    else if (this.frz > 0) { ctx.strokeStyle = "#e1f5fe"; ctx.lineWidth = 2.2; ctx.stroke(); }
     else if (this.slowT > 0) { ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 1.6; ctx.stroke(); }
+    else if (this.poi) { ctx.strokeStyle = "#9ccc65"; ctx.lineWidth = 1.6; ctx.stroke(); }
+    else if (this.bld) { ctx.strokeStyle = "#e53935"; ctx.lineWidth = 1.6; ctx.stroke(); }
+    if (this.shk > 0) { ctx.strokeStyle = "#fff176"; ctx.lineWidth = 1.2; ctx.stroke(); }
     if (this.stunT > 0 || this.crashStun > 0) { ctx.fillStyle = "#fff59d"; ctx.fillRect(-1.5, -rad - 6, 3, 3); ctx.fillRect(-rad * 0.6, -rad - 4, 3, 3); ctx.fillRect(rad * 0.6 - 3, -rad - 4, 3, 3); }
     if (this.elite) { ctx.strokeStyle = "#ffd54f"; ctx.lineWidth = 1.6; ctx.stroke(); ctx.fillStyle = "#ffd54f"; ctx.fillRect(-2, rad + 5, 4, 3); }
     if (this.invuln) { // 보호막: 보스마다 해제 방식이 다르다
@@ -454,11 +492,20 @@ class Enemy extends Component {
     let p = this.transform.position;
     if (this.burn) { // 화상: 0.5초마다 피해
       this.burn.t -= dt; this.burn.tick -= dt;
-      if (this.burn.tick <= 0) { this.burn.tick = 0.5; g.fx.emit(p.x, p.y, { count: 3, colors: ["#ff6d00", "#ffee58"], speed: [10, 30], life: [0.2, 0.4], size: [1, 1.6], fade: true }); this.damage(this.burn.dps * 0.5, this.burn.by, 0, 0); if (this.dead) return; }
+      if (this.burn.tick <= 0) { this.burn.tick = 0.5; g.fx.emit(p.x, p.y, { count: 3, colors: ["#ff6d00", "#ffee58"], speed: [10, 30], life: [0.2, 0.4], size: [1, 1.6], fade: true }); this.damage(this.burn.dps * 0.5, this.burn.by, 0, 0, true); if (this.dead) return; }
       if (this.burn && this.burn.t <= 0) this.burn = null;
     }
+    if (this.poi) { // 중독: 0.5초마다 피해 (여러 번 걸면 갱신)
+      const q = this.poi; q.t -= dt; q.tick -= dt;
+      if (q.tick <= 0) { q.tick = 0.5; g.fx.emit(p.x, p.y, { count: 2, colors: ["#9ccc65", "#c5e1a5"], speed: [8, 24], life: [0.2, 0.4], size: [1, 1.5], fade: true }); this.damage(q.dps * 0.5, q.by, 0, 0, true); if (this.dead) return; }
+      if (this.poi && q.t <= 0) this.poi = null;
+    }
+    if (this.bld) { this.bld.t -= dt; if (this.bld.t <= 0) this.bld = null; }
+    if (this.shk > 0) this.shk -= dt;
+    if (this.rxCd > 0) this.rxCd -= dt;
     if (this.slowT > 0) this.slowT -= dt;
-    const stunned = this.stunT > 0; if (stunned) this.stunT -= dt;
+    if (this.frz > 0) this.frz -= dt;
+    const stunned = this.stunT > 0 || this.frz > 0; if (this.stunT > 0) this.stunT -= dt;
     if (this.crashStun > 0) this.crashStun -= dt;
     const slow = this.slowT > 0 ? this.slowMul : 1;
     if (def.phasing) { this.phT += dt; this.ethereal = (this.phT % 4) > 2.6; }
@@ -698,12 +745,14 @@ class Enemy extends Component {
     g.cam.shake(4, 0.25); SFX.play("boom"); this.die(null, true);
   }
 
-  damage(n, by, angle, knock) {
+  damage(n, by, angle, knock, dot = false) {
     if (this.dead || this.spawnDelay > 0 || this.ethereal || this.lift > 4) return;
     const g = this.game, p = this.transform.position;
     if (this.invuln) { // 보호막: 피해 무효
       g.fx.emit(p.x, p.y, { count: 3, colors: ["#80deea", "#fff"], speed: [20, 60], life: [0.1, 0.25], size: [1, 1.6], fade: true }); SFX.play("block"); return;
     }
+    if (by && by.vsMul && !dot) n = by.vsMul(this, n); // 아이템: 상태/거리/대상별 추가 피해
+    if (this.bld) n *= 1.25; // 출혈: 받는 피해 +25%
     if (this.def.frontGuard && knock > 0 && angleDiff(angle + Math.PI, this.face) < 0.9) { // 방패병: 정면 공격은 약하게
       n *= 0.25; knock *= 0.3; SFX.play("block");
       g.fx.emit(p.x + Math.cos(this.face) * this.radius, p.y + Math.sin(this.face) * this.radius, { count: 3, colors: ["#fff", "#b0bec5"], speed: [20, 60], life: [0.1, 0.25], size: [1, 1.6], fade: true });
@@ -741,14 +790,18 @@ class Projectile extends Component {
     this.area = opts.area || 0; this.orbit = opts.orbit || null; this.speed = opts.speed || speed;
     this.bm = opts.boomerang ? { phase: "out", dist: 0, max: opts.range || 80 } : null;
     this.bounces = opts.bounces || 0; this.homing = opts.homing || 0; this.wave = opts.wave || null; this.age = 0; this.bx = null; this.by = null;
+    this.split = opts.split || 0; this.shape = opts.shape || ""; this.needle = !!opts.needle; this._ht = 0; this._tg = null; // 아이템: 쪼개짐 · 탄 모양(꾸미기) · 바늘 · 유도 대상
+    if (opts.skip) this.hitSet.add(opts.skip);
   }
   setup() {
     if (!this.fromPlayer) this.col = this.gameObject.addComponent(Collider2D.circle(this.radius, { layer: "EProj", body: "kinematic", data: this })); // 근접 공격이 지울 수 있게 (그려진 탄 크기 그대로)
     this.draw = this.gameObject.addComponent(new DrawRenderer(ctx => {
-      if (this.beam) { ctx.rotate(this.angle); ctx.strokeStyle = "#e1f5fe"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(6, 0); ctx.stroke(); return; }
+      if (this.beam) { ctx.rotate(this.angle); ctx.strokeStyle = this.needle ? "#fff" : "#e1f5fe"; ctx.lineWidth = this.needle ? 1.3 : 2.5; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(this.needle ? -8 : -6, 0); ctx.lineTo(this.needle ? 8 : 6, 0); ctx.stroke(); return; }
       if (this.fromPlayer && this.owner) {
         if (this.area) { ctx.fillStyle = this.color; ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.arc(0, 0, this.radius + 3, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
         if (this.bm) { ctx.rotate(performance.now() / 60); ctx.strokeStyle = this.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, this.radius + 1.5, 0.4, 5.6); ctx.stroke(); return; }
+        if (this.shape === "square") { ctx.rotate(this.age * 6); ctx.fillStyle = this.color; ctx.fillRect(-2.6, -2.6, 5.2, 5.2); return; }
+        if (this.shape === "star") { ctx.rotate(this.age * 6); ctx.fillStyle = this.color; ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5, r = i % 2 ? 1.5 : 3.6; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fill(); return; }
         if (this.kind === "bolt" || this.kind === "pierce" || this.kind === "fan") { ctx.rotate(Math.atan2(this.vy, this.vx)); ctx.strokeStyle = this.color; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(3, 0); ctx.stroke(); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(3, 0, 1.2, 0, 7); ctx.fill(); return; }
         ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, 7); ctx.fill(); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, this.radius * 0.4, 0, 7); ctx.fill(); return;
       }
@@ -790,6 +843,14 @@ class Projectile extends Component {
         let best = null, bd = Infinity; for (const h of g.heroes) { if (!h.alive) continue; const hp = h.transform.position, d = Math.hypot(hp.x - p.x, hp.y - p.y); if (d < bd) { bd = d; best = hp; } }
         if (best) { const sp = Math.hypot(this.vx, this.vy), cur = Math.atan2(this.vy, this.vx), want = Math.atan2(best.y - p.y, best.x - p.x); let df = Math.atan2(Math.sin(want - cur), Math.cos(want - cur)); const na = cur + Math.max(-2.2 * dt, Math.min(2.2 * dt, df)); this.vx = Math.cos(na) * sp; this.vy = Math.sin(na) * sp; }
       }
+      if (this.homing && this.fromPlayer && this.age < this.homing) { // 아이템: 내 탄 유도 — 가까운 적 쪽으로 꺾인다 (대상은 0.12초마다 다시 고른다)
+        this._ht -= dt;
+        if (this._ht <= 0 || (this._tg && (this._tg.dead || this._tg.gameObject.isDestroyed))) {
+          this._ht = 0.12; let bd = 110 * 110; this._tg = null;
+          for (const e of g.enemies) { if (e.dead || e.spawnDelay > 0 || this.hitSet.has(e)) continue; const ep = e.transform.position, d = (ep.x - p.x) * (ep.x - p.x) + (ep.y - p.y) * (ep.y - p.y); if (d < bd) { bd = d; this._tg = e; } }
+        }
+        if (this._tg) { const tp = this._tg.transform.position, sp = Math.hypot(this.vx, this.vy), cur = Math.atan2(this.vy, this.vx), want = Math.atan2(tp.y - p.y, tp.x - p.x), df = Math.atan2(Math.sin(want - cur), Math.cos(want - cur)), na = cur + Math.max(-3.2 * dt, Math.min(3.2 * dt, df)); this.vx = Math.cos(na) * sp; this.vy = Math.sin(na) * sp; this.angle = na; }
+      }
       if (this.wave) { // 물결: 진행 방향의 수직으로 흔들리며 간다
         if (this.bx === null) { this.bx = p.x; this.by = p.y; this._pa = this.age; }
         this.bx += this.vx * dt; this.by += this.vy * dt; const sp = Math.hypot(this.vx, this.vy) || 1, nx = -this.vy / sp, ny = this.vx / sp, off = Math.sin((this.age - this._pa) * this.wave[1]) * this.wave[0];
@@ -799,7 +860,7 @@ class Projectile extends Component {
     const q = t.position;
     if (this.life <= 0) { if (this.area && this.fromPlayer) this._boom(); else this.gameObject.destroy(); return; }
     const hw = ARENA.w / 2, hh = ARENA.h / 2;
-    if (!this.bm && !this.orbit && this.bounces > 0 && !this.fromPlayer) { // 벽에 튕긴다
+    if (!this.bm && !this.orbit && this.bounces > 0) { // 벽에 튕긴다 (내 탄도 아이템으로 튕긴다)
       let hit = false;
       if (q.x > hw || q.x < -hw) { this.vx = -this.vx; t.setPosition(Math.max(-hw, Math.min(hw, q.x)), q.y); hit = true; }
       if (q.y > hh || q.y < -hh) { this.vy = -this.vy; t.setPosition(q.x, Math.max(-hh, Math.min(hh, q.y))); hit = true; }
@@ -818,6 +879,7 @@ class Projectile extends Component {
     if (this.fromPlayer) { // 내 탄: 상자·통은 부수고, 탄은 멈추거나(부메랑은 되돌아옴) 관통
       if (o.destructible) o.damage(Math.max(1, Math.round(this.dmg / 2)), this.owner, !!this.area);
       t.setPosition(ox + onx * 0.05, oy + ony * 0.05);
+      if (this.bounces > 0 && !this.bm && !this.area) { const dp = this.vx * onx + this.vy * ony; this.vx -= 2 * dp * onx; this.vy -= 2 * dp * ony; this.angle = Math.atan2(this.vy, this.vx); this.bounces--; this.life = Math.max(this.life, 1.2); this.bx = null; return; }
       if (this.bm) { if (this.bm.phase === "out") { this.bm.phase = "back"; this.hitSet.clear(); } return; }
       if (this.area) { this._boom(); return; }
       if (this.pierce && o.destructible) { this.hitSet.add(o); t.setPosition(q.x, q.y); this._hitActors(ox, oy, q.x - ox, q.y - oy, q); return; }
@@ -828,6 +890,10 @@ class Projectile extends Component {
       t.setPosition(ox + onx * 0.05, oy + ony * 0.05); this.bounces--; this.life = Math.max(this.life, 2.2); this.bx = null; this.homing = 0; return;
     }
     g.fx.emit(ox, oy, { count: 2, colors: ["#ff8a65", "#fff"], speed: [10, 30], life: [0.1, 0.2], size: [1, 1.4], fade: true }); this.gameObject.destroy();
+  }
+  _split(e) { // 아이템: 처음 맞힌 순간 작은 탄으로 갈라진다 (갈라진 탄은 다시 갈라지지 않음)
+    const n = this.split, q = this.transform.position, base = Math.atan2(this.vy, this.vx); this.split = 0;
+    for (let i = 0; i < n; i++) { const a = base + Math.PI / 2 + (i - (n - 1) / 2) * 1.5 + (i % 2 ? Math.PI : 0) * 0; this.game.spawnProj(q.x, q.y, a, 150, this.dmg * 0.4, true, { owner: this.owner, life: 0.5, radius: 1.8, color: this.color, skip: e, shape: this.shape }); }
   }
   static _h = { x: 0, y: 0, hit: false, nx: 0, ny: 0, t: 1, collider: null };
   static _obsFilter(c, pr) { return !pr.hitSet.has(c.data); }
@@ -843,7 +909,8 @@ class Projectile extends Component {
         if (e.dead) { this.hitSet.add(e); continue; }
         if (this.area) { t.setPosition(hx, hy); this._boom(); return true; }
         e.damage(this.dmg, this.owner, Math.atan2(this.vy, this.vx), this.knock); this.hitSet.add(e);
-        if (this.owner && !this.beam) this.owner.applyHitEffects(e, this.dmg);
+        if (this.owner) this.owner.applyHitEffects(e, this.dmg, "proj");
+        if (this.split > 0) this._split(e);
         if (!this.pierce) { this.gameObject.destroy(); return true; }
       }
       return false;

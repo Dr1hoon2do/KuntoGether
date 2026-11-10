@@ -91,8 +91,8 @@ class MinimapRenderer extends Renderer {
     const g = this.game; if (!g.map) return;
     const m = camera.viewMatrix; ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
     const C = 9, seen = [], cp = camera.transform.position;
-    const compass = g.heroes.some(h => h.stats.compass); // 나침반: 층 전체 공개
-    for (const r of g.map.list) if (compass || r.visited || Object.values(r.nb).some(o => o.visited)) seen.push(r);
+    const compass = g.heroes.some(h => h.stats.compass), special = g.heroes.some(h => h.stats.mapSpecial); // 나침반: 층 전체 공개 / 낡은 지도 조각: 특수 방만 공개
+    for (const r of g.map.list) if (compass || r.visited || Object.values(r.nb).some(o => o.visited) || (special && (r.type === "shop" || r.type === "treasure" || r.type === "boss"))) seen.push(r);
     if (!seen.length) return;
     const cells = seen.flatMap(r => r.cells.map(([dx, dy]) => [r.x + dx, r.y + dy]));
     const xs = cells.map(c => c[0]), ys = cells.map(c => c[1]);

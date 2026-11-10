@@ -37,6 +37,7 @@ class Game extends Component {
       const by = e.by; if (!by || !by.stats) return;
       if (by.stats.lifesteal && Math.random() < by.stats.lifesteal) by.heal(1);
       if (by.stats.killInvuln) by.invuln = Math.max(by.invuln, by.stats.killInvuln);
+      itemsOnKill(this, by, e.enemy); // 처치 관련 아이템·세트 효과 → kill 훅
       if (!e.enemy.boss && Math.random() < 0.005 + by.stats.heartDrop) { const q = e.enemy.transform.position; this.spawnHeart(q.x, q.y); }
     }, { owner: this });
     Events.on("hero.hit", () => this._flashVignette(), { owner: this });
@@ -96,6 +97,8 @@ class Game extends Component {
   _owner() { for (const h of this.roster.values()) if (h.conn && this.heroes.includes(h)) return h; return null; }
 
   // ---------- 파티(골드 관련 아이템은 모두에게 적용) ----------
+  // 이벤트 훅 호출: 모든 플레이어가 가진 아이템의 on[evt](주인, 일으킨 플레이어 src, a, b)를 부른다. 이름 목록은 Items.js 맨 위 참고.
+  fire(evt, src, a, b) { for (const h of this.heroes) { const l = h.hooks[evt]; if (l) for (let i = 0; i < l.length; i++) l[i](h, src, a, b); } }
   partySum(k) { let a = 0; for (const h of this.heroes) a += h.stats[k] || 0; return a; }
   partyAny(k) { return this.heroes.some(h => h.stats[k]); }
   partyMul(k) { let a = 1; for (const h of this.heroes) a *= h.stats[k]; return a; }
@@ -224,6 +227,7 @@ class Game extends Component {
       const [x, y] = side === "S" ? [dx0 + off, dy0 + 24] : side === "N" ? [dx0 + off, dy0 - 24] : side === "W" ? [dx0 + 24, dy0 + off] : [dx0 - 24, dy0 + off];
       h.transform.setPosition(x, y); h.invuln = Math.max(h.invuln, 1.2 + h.stats.entryInvuln); h.swing = null; h.echoes = [];
       h.roomT = 0; h.hitThisRoom = false; h.heartBuffOn = false; // 방마다 초기화되는 조건부 효과(양파·낡은 장화·뼈다귀) h.cd = 0; h.kx = h.ky = 0;
+      h.shield = Math.max(h.shield, h.stats.roomShield); h.comboN = 0; // 방마다 보호막 채움
     });
     this._updateCamera(0, true);
     this.introTimer = 0;
@@ -234,6 +238,7 @@ class Game extends Component {
       if (room.type === "boss" && room.cleared && this.floorNum < MAX_FLOOR) this._makeStairs();
     }
     this.state = room.cleared ? "explore" : "fight";
+    this.fire("roomEnter", null, room);
   }
   _np() { return Math.max(1, this.heroes.length); }
   _populate(room) {
@@ -295,15 +300,16 @@ class Game extends Component {
     const at = fn => { const q = this._dropSpot(); fn.call(this, q.x, q.y); };
     let nc = 0;
     if (c.coins !== undefined) nc = c.coins + (R() < P(c.coinExtra) ? 1 : 0); else nc = (R() < P(c.coin + bonus) ? 1 : 0) + (R() < P(c.coin2) ? 1 : 0);
-    for (let i = 0; i < nc; i++) { const v = this.rollCoinValue(bias); at((x, y) => this.spawnCoin(x, y, v)); }
+    for (let i = 0; i < nc; i++) { const v = this.rollCoinValue(bias + this.partySum("coinLuck")); at((x, y) => this.spawnCoin(x, y, v)); }
     if (R() < P(c.key)) at(this.spawnKey);
     if (R() < P(c.heart)) at(this.spawnHeart);
     if (c.bundle && R() < P(c.bundle)) at(this.spawnBundle);
-    if (c.chest && R() < P(c.chest)) at(this.spawnChest);
+    if (c.chest && R() < P(c.chest + this.partySum("chestLuck") * 0.1)) at(this.spawnChest);
   }
   clearRoom() {
     const room = this.cur, np = this._np(), f = this.floorNum, big = !!room.big;
-    room.cleared = true; this.state = "explore"; SFX.play("clear"); this.fire?.("roomClear", room);
+    room.cleared = true; this.state = "explore"; SFX.play("clear");
+    this.fire("roomClear", null, room); // roomClear 훅의 유일한 호출 지점 (보상 코드에서 또 부르지 말 것)
     for (const h of this.heroes) { // 방 클리어: 치유의 향로(확률), 액티브 충전(큰 방은 2)
       if (h.alive && h.stats.roomHeal && Math.random() < h.stats.roomHeal) h.heal(1);
       const a = h.active; if (a && ACTIVES[a.id].kind === "charge") a.charge = Math.min(ACTIVES[a.id].max, a.charge + (big ? 2 : 1));
