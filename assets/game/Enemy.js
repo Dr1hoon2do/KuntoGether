@@ -881,6 +881,7 @@ class Projectile extends Component {
     if (!oc) return;
     const o = oc.data;
     if (this.fromPlayer) { // 내 탄: 상자·통은 부수고, 탄은 멈추거나(부메랑은 되돌아옴) 관통
+      if (o.kind === "crack") this.game.secretDamage(ox, oy, this.dmg, 40); // 비밀방: 금 간 벽에 맞으면 벽이 깨진다
       if (o.destructible) o.damage(Math.max(1, Math.round(this.dmg / 2)), this.owner, !!this.area);
       t.setPosition(ox + onx * 0.05, oy + ony * 0.05);
       if (this.bounces > 0 && !this.bm && !this.area) { const dp = this.vx * onx + this.vy * ony; this.vx -= 2 * dp * onx; this.vy -= 2 * dp * ony; this.angle = Math.atan2(this.vy, this.vx); this.bounces--; this.life = Math.max(this.life, 1.2); this.bx = null; return; }

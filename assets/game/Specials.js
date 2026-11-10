@@ -137,11 +137,11 @@ const Specials = {
       room.cleared = true;
       for (const h of game.heroes) if (h.alive && h.hp > 1) { h.hp -= 1; h.draw.flash = 0.1; h.hurtT = 3; }       // 들어오는 대가: 모두 체력 1 (마지막 1은 남김)
       SFX.play("hurt"); game.cam.shake(3, 0.25);
-      const spots = lay.spots || [], n = Math.min(spots.length, 1 + Math.floor(np / 3)), mid = Math.min(1, spots.length - 1); // 받침대(p)가 놓인 자리 — 가운데에 아이템, 사람이 많으면 하나 더
+      const sw = lay.slotsW, spots = sw && sw.rewards ? sw.rewards : (lay.spots || []).slice().sort((a, b) => Math.abs(a.x) - Math.abs(b.x)), n = Math.min(spots.length, 1 + Math.floor(np / 3)), mid = 0; // [아이템, 둘째 아이템(3명↑), 코인…] 순서 // 받침대(p)가 놓인 자리 — 가운데에 아이템, 사람이 많으면 하나 더
       for (let i = 0; i < spots.length; i++) {
         const s = spots[i];
         if (i === mid && n >= 1) game._makePickup({ ...game._itemSlot(takenP, takenA, 0.2), price: 0, x: s.x, y: s.y });
-        else if (i === (mid === 0 ? 1 : 0) && n >= 2) game._makePickup({ ...game._itemSlot(takenP, takenA, 0.2), price: 0, x: s.x, y: s.y });
+        else if (i === 1 && n >= 2) game._makePickup({ ...game._itemSlot(takenP, takenA, 0.2), price: 0, x: s.x, y: s.y });
         else game.spawnCoin(s.x, s.y, game.rollCoinValue(0.3));
       }
     } else if (t === "sacrifice") { room.cleared = true; room.sp = { count: 0 }; }
@@ -155,9 +155,9 @@ const Specials = {
       const pos = game._layout(items.length, 6); items.forEach((it, i) => game._makePickup({ ...it, price: 0, x: pos[i].x, y: pos[i].y }));
     }
     else if (t === "secret") { // 비밀방 보상: 아이템 하나, 아니면 코인·하트·열쇠 더미
-      room.cleared = true; const q = game._freeSpot(0, 0, 14);
+      room.cleared = true; const sw = lay.slotsW, q = game._layout(1, 0)[0];
       if (Math.random() < 0.5) game._makePickup({ ...game._itemSlot(takenP, takenA, 0.15), price: 0, x: q.x, y: q.y });
-      else { for (let i = 0; i < 4; i++) { const s2 = game._dropSpot(40); game.spawnCoin(s2.x, s2.y, game.rollCoinValue(0.4)); } const h2 = game._dropSpot(40); game.spawnHeart(h2.x, h2.y); const k2 = game._dropSpot(40); game.spawnKey(k2.x, k2.y); }
+      else { const pile = sw && sw.pile && sw.pile.length ? sw.pile : null, at = i => pile ? pile[i % pile.length] : game._dropSpot(40); for (let i = 0; i < 4; i++) { const s2 = at(i); game.spawnCoin(s2.x, s2.y, game.rollCoinValue(0.4)); } const h2 = at(4); game.spawnHeart(h2.x, h2.y); const k2 = at(5); game.spawnKey(k2.x, k2.y); }
     }
     else if (t === "ambush") { room.waves = 3; game._spawnWave(false, 1); }
     else if (t === "library") {
@@ -168,7 +168,7 @@ const Specials = {
   // clearRoom에서: 전투가 있는 특수 방의 보상
   reward(game, room, np) {
     if (room.type === "ambush") {
-      const takenP = game._heldItems(), takenA = game._heldActives(), pos = game._layout(np, 0);
+      const takenP = game._heldItems(), takenA = game._heldActives(), rs = room.layout && room.layout.slotsW && room.layout.slotsW.rewardSpots, pos = rs && rs.length >= np ? rs : game._layout(np, 0); // 콘텐츠가 정한 보상 자리
       for (let i = 0; i < np; i++) game._makePickup({ ...game._itemSlot(takenP, takenA, 0.2), price: 0, x: pos[i].x, y: pos[i].y });
       game._roomRewards(ECON.elite, np, false);
     }

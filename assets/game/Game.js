@@ -214,8 +214,9 @@ class Game extends Component {
   spawnActivePickup(x, y, id, price = 0) { return this._makePickup({ type: "active", id, price, x, y, state: null }); }
   // n개를 한 줄에 최대 8개씩 가지런히 놓을 자리 (cy: 가운데 높이)
   _layout(n, cy = 0) {
-    const lay = this.cur && this.cur.layout, ped = lay && lay.pedestals; // 방 구성이 받침대(p)를 정해 두었으면 그 자리에 놓는다
-    if (ped && ped.length >= n) { const pick = ped.slice(0, n).sort((a, b) => b.y - a.y || a.x - b.x); return pick.map(q => ({ x: q.x, y: q.y })); }
+    const lay = this.cur && this.cur.layout, sw = lay && lay.slotsW; // 방 구성(콘텐츠)이 알려준 받침대 자리: slots.pedestals(+spare) → 없으면 'p' 타일
+    const list = sw && sw.pedestals ? [...sw.pedestals, ...(sw.spare || [])] : lay && lay.pedestals ? lay.pedestals : null;
+    if (list && list.length >= n) return list.slice(0, n).map(q => ({ x: q.x, y: q.y }));
     const rows = Math.max(1, Math.ceil(n / 8)), per = Math.ceil(n / rows), out = [];
     for (let r = 0; r < rows; r++) { const cnt = Math.min(per, n - r * per), y = cy + ((rows - 1) / 2 - r) * 34; for (let i = 0; i < cnt; i++) out.push({ x: (i - (cnt - 1) / 2) * 44, y }); }
     for (let i = 0; i < out.length; i++) { // 지형 위에 놓이지 않게 옆으로 비킨다

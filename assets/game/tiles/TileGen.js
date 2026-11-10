@@ -163,7 +163,7 @@ function validate(G) {
   if (lost > freeN * 0.12) return { ok: false, why: "pockets" };
   for (let k = 0; k < m.t.length; k++) if (m.mask[k] && !T_SOLID[m.t[k]] && !soft[k]) m.t[k] = T.WALL; // 닿을 수 없는 구멍은 벽으로 메운다
   const open = (freeN - lost) / Math.max(1, maskN);
-  if (open < (G.type === "boss" ? MIN_OPEN_BOSS : MIN_OPEN)) return { ok: false, why: "open" };
+  if (open < (G.type === "boss" ? MIN_OPEN_BOSS : PERTURB_KINDS.has(G.type) ? MIN_OPEN : 0.08)) return { ok: false, why: "open" }; // 비밀방 같은 작은 방은 열린 비율 조건이 느슨하다
   return { ok: true, reach: soft, ratio: open };
 }
 
@@ -230,6 +230,12 @@ function buildLayout(room, floor = 3, players = 1) {
   const a = sp || ph; if (a) { const out = a.build(G.makeCtx()) || {}; G.apply(out); } else G.finishFrame(); G.finishFrame();
   const v = validate(G); return finishLayout(G, v.ok ? v : { ok: true, reach: floodTiles(G.map, [G.ij(...(G.entries[0] || G.checks[0] || [1, 1]))], 2), ratio: 1 }, 15, true);
 }
+// 콘텐츠가 알려준 slots(뒤집힌 틀의 타일 좌표 [x,y])를 월드 좌표 {x,y}로 바꾼다 (배열·중첩 배열 모두)
+function mapSlots(G, slots) {
+  if (!slots) return null; const m = G.map, isPt = a => Array.isArray(a) && a.length === 2 && typeof a[0] === "number" && typeof a[1] === "number";
+  const conv = v => { if (isPt(v)) { const [X, Y] = G.F(v[0], v[1]); return { x: m.cx(X), y: m.cy(G.H - 1 - Y) }; } return Array.isArray(v) ? v.map(conv) : v; };
+  const out = {}; for (const k of Object.keys(slots)) out[k] = conv(slots[k]); return out;
+}
 function finishLayout(G, v, attempts, fallback) {
   const m = G.map, reach = v.reach, zones = G.zones.filter(z => { // 도달 가능한 타일이 4개 이상 있는 구역만
     let n = 0; const i0 = Math.max(0, m.ti(z.x - z.hw + 1)), i1 = Math.min(m.cols - 1, m.ti(z.x + z.hw - 1)), j0 = Math.max(0, m.tj(z.y - z.hh + 1)), j1 = Math.min(m.rows - 1, m.tj(z.y + z.hh - 1));
@@ -239,7 +245,7 @@ function finishLayout(G, v, attempts, fallback) {
   let spikes = null, pedestals = null;
   for (let j = 0; j < m.rows; j++) for (let i = 0; i < m.cols; i++) { const c = m.t[j * m.cols + i]; if (c === T.SPIKE) (spikes || (spikes = [])).push({ x: m.cx(i), y: m.cy(j), hw: TILE / 2, hh: TILE / 2, ph: j * 0.62 + i * 0.11 + (j & 1 ? 0.3 : 0) }); else if (c === T.PEDESTAL) (pedestals || (pedestals = [])).push({ x: m.cx(i), y: m.cy(j) }); }
   if (pedestals) pedestals.sort((a, b) => b.y - a.y || a.x - b.x);
-  return { map: m, reach, zones, bossSpawn: G.bossSpawn, names: G.names, ratio: v.ratio, spikes, pedestals, spots: pedestals ? pedestals.slice().sort((a, b) => a.x - b.x) : null, slots: G.slots || null, attempts, fallback, grid: null, flip: [G.fx, G.fy], shape: G.shape };
+  return { map: m, reach, zones, bossSpawn: G.bossSpawn, names: G.names, ratio: v.ratio, spikes, pedestals, spots: pedestals ? pedestals.slice().sort((a, b) => a.x - b.x) : null, slots: G.slots || null, slotsW: mapSlots(G, G.slots), attempts, fallback, grid: null, flip: [G.fx, G.fy], shape: G.shape };
 }
 // 도달 가능한 자리인가 (타일 기준). 레이아웃이 없으면 true
 function layoutReach(lay, x, y) {
