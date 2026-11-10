@@ -53,6 +53,7 @@ let diff = store.get("kg.diff") || "normal";
 // 터치를 id별로 추적하고, 터치 이벤트마다 "지금 실제로 눌려 있는 터치 목록"과 대조해서 떼어진 손가락의 찌꺼기(스틱 고정)를 지운다.
 const cv = $("pad"), g = cv.getContext("2d");
 const touches = new Map(); // id -> { role: move|aim|dash|act, ox, oy, x, y }
+const keys = new Set(), mouse = { down: false, x: 0, y: 0 }; // PC 입력 상태
 let actInfo = null; // 액티브 아이템 상태 { name, text, ready }
 let color = "#4fc3f7";
 const R = () => Math.max(45, Math.min(80, Math.min(innerWidth, innerHeight) * 0.14));
@@ -71,20 +72,36 @@ function pStart(id, x, y) {
 function pMove(id, x, y) { const t = touches.get(id); if (t) { t.x = x; t.y = y; } }
 function pEnd(id) { touches.delete(id); }
 function reconcile(active) { for (const id of [...touches.keys()]) if (id !== "mouse" && !active.has(id)) touches.delete(id); } // 이미 떼어진 터치 제거
-function clearAll() { touches.clear(); draw(); }
+function clearAll() { touches.clear(); keys.clear(); mouse.down = false; draw(); }
 
 const opt = { passive: false };
 cv.addEventListener("touchstart", e => { e.preventDefault(); for (const t of e.changedTouches) pStart(t.identifier, t.clientX, t.clientY); reconcile(new Set([...e.touches].map(t => t.identifier))); draw(); }, opt);
 cv.addEventListener("touchmove", e => { e.preventDefault(); for (const t of e.changedTouches) pMove(t.identifier, t.clientX, t.clientY); draw(); }, opt);
 const tend = e => { e.preventDefault(); for (const t of e.changedTouches) pEnd(t.identifier); reconcile(new Set([...e.touches].map(t => t.identifier))); draw(); };
 cv.addEventListener("touchend", tend, opt); cv.addEventListener("touchcancel", tend, opt);
-// 데스크톱 마우스 (테스트용)
+// PC 조작: WASD/방향키 이동 · 마우스 왼쪽 버튼 = 공격 (화면 가운데에서 마우스 쪽으로 조준, 가운데 근처면 자동 조준) · 스페이스 대시 · R 액티브
+// 화면의 대시/액티브 버튼은 마우스로 눌러도 된다.
 let lastTouch = 0; cv.addEventListener("touchstart", () => { lastTouch = Date.now(); }, opt);
-cv.addEventListener("mousedown", e => { if (Date.now() - lastTouch > 600) { pStart("mouse", e.clientX, e.clientY); draw(); } });
-addEventListener("mousemove", e => { pMove("mouse", e.clientX, e.clientY); if (touches.has("mouse")) draw(); });
-addEventListener("mouseup", () => { pEnd("mouse"); draw(); });
+const MOVE_KEYS = { KeyW: [0, 1], KeyS: [0, -1], KeyA: [-1, 0], KeyD: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+const typing = e => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+addEventListener("keydown", e => { if (typing(e) || e.metaKey || e.ctrlKey) return; if (MOVE_KEYS[e.code] || e.code === "Space" || e.code === "KeyR") { e.preventDefault(); keys.add(e.code); } });
+addEventListener("keyup", e => { keys.delete(e.code); });
+const kbMove = () => { let x = 0, y = 0; for (const k of keys) { const m = MOVE_KEYS[k]; if (m) { x += m[0]; y += m[1]; } } const l = Math.hypot(x, y); return l ? [x / l, y / l] : null; };
+const mouseAim = () => { // 화면 가운데 → 마우스 방향. 가운데 근처(데드존)면 [0,0] = 자동 조준
+  const r = Math.min(innerWidth, innerHeight) * 0.3, dx = (mouse.x - innerWidth / 2) / r, dy = -(mouse.y - innerHeight / 2) / r, l = Math.hypot(dx, dy);
+  if (l < 0.35) return [0, 0]; return l > 1 ? [dx / l, dy / l] : [dx, dy];
+};
+cv.addEventListener("mousedown", e => {
+  if (Date.now() - lastTouch < 600) return; mouse.x = e.clientX; mouse.y = e.clientY;
+  const d = dashBtn(), a = actBtn();
+  if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < d.r + 4 || Math.hypot(e.clientX - a.x, e.clientY - a.y) < a.r + 4) pStart("mouse", e.clientX, e.clientY); // 버튼
+  else if (e.button === 0) mouse.down = true;
+  draw();
+});
+addEventListener("mousemove", e => { mouse.x = e.clientX; mouse.y = e.clientY; pMove("mouse", e.clientX, e.clientY); if (mouse.down || touches.has("mouse")) draw(); });
+addEventListener("mouseup", () => { mouse.down = false; pEnd("mouse"); draw(); });
 // 화면이 가려지거나 포커스를 잃으면 전부 해제
-addEventListener("blur", clearAll); addEventListener("pagehide", clearAll);
+addEventListener("blur", () => { keys.clear(); mouse.down = false; clearAll(); }); addEventListener("pagehide", clearAll);
 document.addEventListener("visibilitychange", () => { clearAll(); if (!document.hidden) ensureConnected(); });
 document.addEventListener("gesturestart", e => e.preventDefault()); document.addEventListener("contextmenu", e => e.preventDefault());
 
@@ -106,6 +123,7 @@ function draw() {
   g.fillStyle = !has ? "#ffffff10" : actOn ? "#ffd54fcc" : actInfo.ready ? "#ffd54f55" : "#ffffff18"; g.beginPath(); g.arc(ab.x, ab.y, ab.r, 0, 7); g.fill();
   g.strokeStyle = has && actInfo.ready ? "#ffd54f" : "#ffffff40"; g.lineWidth = 2; g.stroke(); g.fillStyle = has ? "#fff" : "#ffffff50"; g.font = "13px sans-serif";
   g.fillText(has ? "액티브" : "없음", ab.x, ab.y - 2); if (has) { g.font = "11px sans-serif"; g.fillText(actInfo.text.replace(actInfo.name, "").trim() || actInfo.text, ab.x, ab.y + 13); } g.font = "14px sans-serif";
+  if (mouse.down) { const [ax, ay] = mouseAim(), r = Math.min(innerWidth, innerHeight) * 0.3, cx = innerWidth / 2, cy = innerHeight / 2; g.strokeStyle = "#ff8a65"; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, r, 0, 7); g.stroke(); g.fillStyle = "#ff8a65aa"; g.beginPath(); g.arc(cx + ax * r, cy - ay * r, 18, 0, 7); g.fill(); }
   for (const t of touches.values()) if (t.role !== "dash" && t.role !== "act") {
     const c = t.role === "aim" ? "#ff8a65" : color, r = R();
     g.strokeStyle = c; g.lineWidth = 2; g.beginPath(); g.arc(t.ox, t.oy, r, 0, 7); g.stroke();
@@ -153,8 +171,8 @@ async function start() {
       clearTimeout(rtcTimer); connected = true; retries = 0; msg("");
       c.send({ t: "hello", pid, name: nick, diff });
       sendTimer = setInterval(() => {
-        const [mx, my] = vec("move"), [ax, ay] = vec("aim"), now = Date.now();
-        const out = JSON.stringify({ t: "s", mx: +mx.toFixed(2), my: +my.toFixed(2), ax: +ax.toFixed(2), ay: +ay.toFixed(2), atk: hasRole("aim") ? 1 : 0, dash: hasRole("dash") ? 1 : 0, act: hasRole("act") ? 1 : 0 });
+        const [mx, my] = kbMove() || vec("move"), [ax, ay] = mouse.down ? mouseAim() : vec("aim"), now = Date.now();
+        const out = JSON.stringify({ t: "s", mx: +mx.toFixed(2), my: +my.toFixed(2), ax: +ax.toFixed(2), ay: +ay.toFixed(2), atk: hasRole("aim") || mouse.down ? 1 : 0, dash: hasRole("dash") || keys.has("Space") ? 1 : 0, act: hasRole("act") || keys.has("KeyR") ? 1 : 0 });
         if (out !== last || now - lastAt > 150) { c.send(JSON.parse(out)); last = out; lastAt = now; } // 바뀌지 않아도 150ms마다 보내서 TV가 "끊김"을 알아챌 수 있게
       }, 33);
     });
