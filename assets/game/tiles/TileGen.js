@@ -230,15 +230,31 @@ function buildOnce(room, floor, players, rng) {
   G.finishFrame();
   return G;
 }
+// 바깥 테두리: 칸의 가장자리 한 줄은 이제 벽이 아니라 걸을 수 있는 바닥이다. 벽은 칸 바깥에 얇은 띠(WALL_BAND)로 그려지고, 충돌 벽은 칸 가장자리에 있다 (Game._buildWalls).
+// 생성·검증은 예전처럼 안쪽(14x7) 기준으로 끝낸 뒤 마지막에 테두리를 바닥으로 바꾼다. 금 간 벽(비밀방 입구)은 타일이 아니라 바깥 벽 띠 위의 지형(crackRects)이다.
+const CRACK_IN = 10; // 금 간 벽이 칸 안쪽으로 튀어나오는 깊이 (탄·폭발이 닿게)
+function finalizeRing(G, v) {
+  const m = G.map;
+  for (let Y = 0; Y < G.H; Y++) for (let X = 0; X < G.W; X++) { if (!G.inside(X, Y)) continue; const c = G.code(X, Y); if ((c === T.WALL || c === T.CRACK) && G.border(X, Y)) G.put(X, Y, T.FLOOR); }
+  const rects = [], o = G.owner, th = WALL_BAND + CRACK_IN, off = (WALL_BAND - CRACK_IN) / 2;
+  for (const d of G.doors) if (d.secret) {
+    const len = d.gap.length * TILE;
+    if (d.side === "N") rects.push({ x: o.x, y: o.y + CELL_H / 2 + off, w: len, h: th }); else if (d.side === "S") rects.push({ x: o.x, y: o.y - CELL_H / 2 - off, w: len, h: th });
+    else if (d.side === "E") rects.push({ x: o.x + CELL_W / 2 + off, y: o.y, w: th, h: len }); else rects.push({ x: o.x - CELL_W / 2 - off, y: o.y, w: th, h: len });
+  }
+  m.crackRects = rects.length ? rects : null;
+  const e0 = G.entries[0] || G.checks[0]; if (e0) v.reach = floodTiles(m, [G.ij(e0[0], e0[1])], 2); // 테두리 바닥까지 포함해서 다시
+  return v;
+}
 function buildLayout(room, floor = 3, players = 1) {
   const base = (room.seed != null ? room.seed : (room.seed = (Math.random() * 4294967296) >>> 0)) >>> 0;
   for (let attempt = 0; attempt < 14; attempt++) {
     const G = buildOnce(room, floor, players, new Rng(hash2(base, attempt + 1))), v = validate(G);
-    if (v.ok) return finishLayout(G, v, attempt + 1, false);
+    if (v.ok) return finishLayout(G, finalizeRing(G, v), attempt + 1, false);
   }
   // 안전한 빈 방: 테두리·문·예약 구역만 (모든 시도가 실패했을 때)
   const G = new Generator(room, floor, players, new Rng(base), [false, false]); G.names.push("fallback"); G.finishFrame();
-  const v = validate(G); return finishLayout(G, v.ok ? v : { ok: true, reach: floodTiles(G.map, [G.ij(...(G.entries[0] || G.checks[0] || [1, 1]))], 2), ratio: 1 }, 15, true);
+  const v = validate(G); return finishLayout(G, finalizeRing(G, v.ok ? v : { ok: true, reach: floodTiles(G.map, [G.ij(...(G.entries[0] || G.checks[0] || [1, 1]))], 2), ratio: 1 }), 15, true);
 }
 // 콘텐츠가 알려준 slots(뒤집힌 틀의 타일 좌표 [x,y])를 월드 좌표 {x,y}로 바꾼다 (배열·중첩 배열 모두)
 function mapSlots(G, slots) {

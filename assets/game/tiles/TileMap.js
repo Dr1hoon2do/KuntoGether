@@ -62,6 +62,7 @@ class TileMap {
       }
     };
     merge(T.WALL, "wall"); merge(T.PIT, "pit"); merge(T.MACHINE, "machine", true); merge(T.CRACK, "crack");
+    if (this.crackRects) for (const r of this.crackRects) out.push({ kind: "crack", x: r.x, y: r.y, w: r.w, h: r.h, hp: T_HP.crack }); // 비밀방 입구: 바깥 벽 띠 위에 놓인 금 간 벽
     let ax0 = 1e9, ax1 = -1, ay0 = 1e9, ay1 = -1;
     for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
       const c = t[at(i, j)];

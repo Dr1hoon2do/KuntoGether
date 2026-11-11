@@ -28,12 +28,12 @@ const ROOM_ICONS = { start: "◆", normal: "·", elite: "!", treasure: "★", sh
 for (const [k, v] of Object.entries(SPECIAL_ROOMS)) { ROOM_COLORS[k] = v.color; ROOM_ICONS[k] = v.icon; }
 ROOM_COLORS.devil = "#b71c1c"; ROOM_ICONS.devil = "Ψ"; ROOM_COLORS.secret = "#b39ddb"; ROOM_ICONS.secret = "?"; // 특수 방(가시·희생·도박·매복·서재)
 const FLOOR_TINTS = ["#2a2420", "#232a28", "#2a2329", "#292a22", "#222a2a", "#2a2222", "#28242c", "#2c2020"];
-const DOOR_W = 30;
+const DOOR_OPEN = 40; // 바깥 벽 띠에 뚫린 문 틈의 폭
 class ArenaRenderer extends Renderer {
   constructor(game) { super(); this.game = game; this.sortingLayer = "Background"; this._c = null; this._key = ""; this._scale = 0; this._built = 0; game.App.clearColor = "#14110f"; }
   // 바닥·격자·바깥 벽은 방이 바뀔 때만 오프스크린 캔버스에 한 번 그려 두고, 매 프레임은 한 번에 찍어 낸다 (예전엔 매 프레임 전체 화면을 여러 번 칠했다).
   _bake(s, tint) {
-    const g = this.game, cw = ARENA.BASE_W, ch = ARENA.BASE_H, cells = ARENA.cells, M = 4;
+    const g = this.game, cw = ARENA.BASE_W, ch = ARENA.BASE_H, cells = ARENA.cells, B = WALL_BAND, M = B + 4;
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (const c of cells) { x0 = Math.min(x0, c.x - cw / 2); x1 = Math.max(x1, c.x + cw / 2); y0 = Math.min(y0, c.y - ch / 2); y1 = Math.max(y1, c.y + ch / 2); }
     x0 -= M; x1 += M; y0 -= M; y1 += M;
@@ -55,6 +55,23 @@ class ArenaRenderer extends Renderer {
       for (let y = c.y - ch / 2; y <= c.y + ch / 2 + 0.1; y += TILE) { c2.moveTo(c.x - cw / 2, y); c2.lineTo(c.x + cw / 2, y); }
       c2.stroke();
     }
+    // 바깥 벽: 걸을 수 있는 칸(16x9 전부) 바깥에 두께 B의 띠로 그린다. 이웃 칸이 없는 쪽만, 문이 있는 곳은 틈을 뚫는다 (충돌 벽은 칸 가장자리, Game._buildWalls)
+    const doors = g.cur ? Object.keys(g.cur.nb) : [], sides = [["N", 0, 1], ["S", 0, -1], ["E", 1, 0], ["W", -1, 0]];
+    for (const c of cells) for (const [d, sx, sy] of sides) {
+      if (has(c.dx + sx, c.dy + sy)) continue; const horiz = sy !== 0;
+      const xa = c.x - cw / 2 - (has(c.dx - 1, c.dy) || !horiz ? 0 : B), xb = c.x + cw / 2 + (has(c.dx + 1, c.dy) || !horiz ? 0 : B), ya = c.y - ch / 2 - (has(c.dx, c.dy - 1) || horiz ? 0 : B), yb = c.y + ch / 2 + (has(c.dx, c.dy + 1) || horiz ? 0 : B);
+      const rx = horiz ? xa : (sx > 0 ? c.x + cw / 2 : c.x - cw / 2 - B), ry = horiz ? (sy > 0 ? c.y + ch / 2 : c.y - ch / 2 - B) : ya, rw = horiz ? xb - xa : B, rh = horiz ? B : yb - ya;
+      c2.fillStyle = "#4a4a58"; c2.fillRect(rx, ry, rw, rh);
+      c2.fillStyle = "#5d5d6b"; if (horiz) c2.fillRect(rx, ry + (sy > 0 ? B * 0.35 : 0), rw, B * 0.65); else c2.fillRect(rx + (sx > 0 ? 0 : 0), ry, rw, rh);
+      c2.strokeStyle = "#2c2c36"; c2.lineWidth = 1; c2.beginPath(); // 방 쪽 가장자리 선
+      if (horiz) { const yy = sy > 0 ? ry : ry + B; c2.moveTo(rx, yy); c2.lineTo(rx + rw, yy); } else { const xx = sx > 0 ? rx : rx + B; c2.moveTo(xx, ry); c2.lineTo(xx, ry + rh); } c2.stroke();
+      c2.strokeStyle = "#ffffff12"; c2.beginPath(); // 벽돌 이음선
+      if (horiz) for (let x = Math.ceil(rx / TILE) * TILE; x < rx + rw; x += TILE) { c2.moveTo(x, ry); c2.lineTo(x, ry + B); } else for (let y = Math.ceil(ry / TILE) * TILE; y < ry + rh; y += TILE) { c2.moveTo(rx, y); c2.lineTo(rx + B, y); }
+      c2.stroke();
+    }
+    for (const d of doors) { const [x, y] = doorPos(d), horiz = d === "N" || d === "S", sx = d === "E" ? 1 : d === "W" ? -1 : 0, sy = d === "N" ? 1 : d === "S" ? -1 : 0; // 문 틈
+      if (horiz) c2.clearRect(x - DOOR_OPEN / 2, sy > 0 ? y : y - B, DOOR_OPEN, B); else c2.clearRect(sx > 0 ? x : x - B, y - DOOR_OPEN / 2, B, DOOR_OPEN);
+    }
     if (g.tiles) drawStaticTiles(c2, g.tiles); // 벽·기둥·구덩이 (타일맵에서)
     this._x0 = x0; this._y1 = y1; this._scale = s; this._built = performance.now();
   }
@@ -62,7 +79,7 @@ class ArenaRenderer extends Renderer {
     const m = camera.viewMatrix, g = this.game, locked = g.state !== "explore";
     const devil = g.cur && g.cur.type === "devil", tint = devil ? "#2b1013" : FLOOR_TINTS[(g.floorNum - 1) % FLOOR_TINTS.length], cells = ARENA.cells; // 악마 상점은 붉은 검정 바닥
     let h = g.floorNum; for (const c of cells) h = (h * 31 + c.x * 7 + c.y * 13) | 0;
-    const s = Math.hypot(m.a, m.b), key = h + "|" + cells.length + (devil ? "d" : "") + "|" + (g.tiles ? g.tiles.uid + "." + g.tiles.version : 0);
+    const s = Math.hypot(m.a, m.b), key = h + "|" + cells.length + (devil ? "d" : "") + "|" + (g.tiles ? g.tiles.uid + "." + g.tiles.version : 0) + "|" + (g.cur ? Object.keys(g.cur.nb).join("") : "");
     if (key !== this._key || Math.abs(s - this._scale) > 0.001 * s && performance.now() - this._built > 300) { this._key = key; this._bake(s, tint); }
     const k = s / this._scale; // 배율이 조금 달라도 늘려서 찍는다 (줌 트윈 중 매 프레임 다시 굽지 않게)
     // 화면 픽셀에 맞춰 찍는다 (확대·축소 없이 1:1이면 선이 번지지 않는다)
@@ -72,11 +89,11 @@ class ArenaRenderer extends Renderer {
     ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
     if (!g.cur) return;
     for (const [d, room] of Object.entries(g.cur.nb)) { // 문
-      const [x, y] = doorPos(d), horiz = d === "N" || d === "S";
+      const [x0, y0] = doorPos(d), horiz = d === "N" || d === "S", B = WALL_BAND, x = x0 + (d === "E" ? B / 2 : d === "W" ? -B / 2 : 0), y = y0 + (d === "N" ? B / 2 : d === "S" ? -B / 2 : 0); // 문은 바깥 벽 띠의 틈 한가운데
       ctx.fillStyle = locked ? "#c62828" : room.locked ? "#fdd835" : "#2e7d32"; // 노랑 = 열쇠가 필요한 문
-      if (horiz) ctx.fillRect(x - DOOR_W / 2, y - 2.5, DOOR_W, 5); else ctx.fillRect(x - 2.5, y - DOOR_W / 2, 5, DOOR_W);
+      if (horiz) ctx.fillRect(x - DOOR_OPEN / 2 + 4, y - 3, DOOR_OPEN - 8, 6); else ctx.fillRect(x - 3, y - DOOR_OPEN / 2 + 4, 6, DOOR_OPEN - 8);
       if (!locked) { ctx.globalAlpha = 0.18 + 0.1 * Math.sin(performance.now() / 300); ctx.fillStyle = ROOM_COLORS[room.type]; ctx.beginPath(); ctx.arc(x, y, 16, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
-      const ix = x + (d === "E" ? -14 : d === "W" ? 14 : 0), iy = y + (d === "N" ? -14 : d === "S" ? 14 : 0);
+      const ix = x0 + (d === "E" ? -14 : d === "W" ? 14 : 0), iy = y0 + (d === "N" ? -14 : d === "S" ? 14 : 0);
       ctx.save(); ctx.translate(ix, iy); ctx.scale(1, -1); ctx.fillStyle = ROOM_COLORS[room.type]; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(ROOM_ICONS[room.type], 0, 0); ctx.restore();
       if (room.locked) { // 열쇠가 필요한 문: 작은 자물쇠

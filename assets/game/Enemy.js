@@ -395,9 +395,9 @@ class Enemy extends Component {
       else if (b.type === "charge") { ctx.lineWidth = b.d.ram ? 6 : 4; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(b.dir) * (b.d.ram ? 160 : 90), Math.sin(b.dir) * (b.d.ram ? 160 : 90)); ctx.stroke(); }
       else if (b.type === "leap") { ctx.beginPath(); ctx.arc(b.tx - p0.x, b.ty - p0.y, b.d.radius, 0, 7); ctx.fill(); ctx.strokeStyle = "#ff1744"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(b.tx - p0.x, b.ty - p0.y); ctx.stroke(); }
       else if (b.type === "wall" && b.phase === "wind") { // 안전한 틈이 어디인지 보여 준다
-        ctx.globalAlpha = 0.5; const hw = ARENA.w / 2 - TILE, hh = ARENA.h / 2 - TILE, v = b.side === "N" || b.side === "S", len = v ? ARENA.w : ARENA.h, e = b.side === "N" ? hh : b.side === "S" ? -hh : b.side === "E" ? hw : -hw;
+        ctx.globalAlpha = 0.5; const hw = ARENA.w / 2 - 3, hh = ARENA.h / 2 - 3, v = b.side === "N" || b.side === "S", len = v ? ARENA.w : ARENA.h, e = b.side === "N" ? hh : b.side === "S" ? -hh : b.side === "E" ? hw : -hw;
         const seg = (a0, a1, col) => { ctx.strokeStyle = col; ctx.lineWidth = 5; ctx.beginPath(); if (v) { ctx.moveTo(a0 - p0.x, e - p0.y); ctx.lineTo(a1 - p0.x, e - p0.y); } else { ctx.moveTo(e - p0.x, a0 - p0.y); ctx.lineTo(e - p0.x, a1 - p0.y); } ctx.stroke(); };
-        seg(-len / 2 + TILE, b.gc - b.gap / 2, "#ff1744"); seg(b.gc + b.gap / 2, len / 2 - TILE, "#ff1744"); seg(b.gc - b.gap / 2, b.gc + b.gap / 2, "#69f0ae");
+        seg(-len / 2 + 4, b.gc - b.gap / 2, "#ff1744"); seg(b.gc + b.gap / 2, len / 2 - 4, "#ff1744"); seg(b.gc - b.gap / 2, b.gc + b.gap / 2, "#69f0ae");
       }
       else if (b.type === "cross") {
         const on = b.phase === "on"; ctx.globalAlpha = on ? 0.9 : 0.35 + 0.2 * Math.sin(this.t * 30); ctx.lineWidth = on ? b.d.width : 1.5; ctx.strokeStyle = on ? "#ff5252" : "#ff1744";
@@ -481,8 +481,8 @@ class Enemy extends Component {
       default: return [c * sp, s * sp]; // chase
     }
   }
-  _rand() { const cells = ARENA.cells, cl = cells[Math.floor(Math.random() * cells.length)]; return [cl.x + (Math.random() * 2 - 1) * (ARENA.BASE_W / 2 - TILE - 10), cl.y + (Math.random() * 2 - 1) * (ARENA.BASE_H / 2 - TILE - 10)]; }
-  _clampPos(x, y, m = 10) { m += TILE; return [Math.max(-ARENA.w / 2 + m, Math.min(ARENA.w / 2 - m, x)), Math.max(-ARENA.h / 2 + m, Math.min(ARENA.h / 2 - m, y))]; } // (바깥 테두리 벽 한 타일 안쪽으로)
+  _rand() { const cells = ARENA.cells, cl = cells[Math.floor(Math.random() * cells.length)]; return [cl.x + (Math.random() * 2 - 1) * (ARENA.BASE_W / 2 - 12), cl.y + (Math.random() * 2 - 1) * (ARENA.BASE_H / 2 - 12)]; }
+  _clampPos(x, y, m = 10) { return [Math.max(-ARENA.w / 2 + m, Math.min(ARENA.w / 2 - m, x)), Math.max(-ARENA.h / 2 + m, Math.min(ARENA.h / 2 - m, y))]; } // (칸 가장자리 안쪽으로 — 바깥 벽은 칸 밖에 있다)
 
   update(dt) {
     if (this.col) this.col.active = !this.dead && this.spawnDelay <= 0;
@@ -605,7 +605,7 @@ class Enemy extends Component {
       case "leap": this.busy = { type: "leap", d, at, phase: "wind", t: d.windup || 0.6, tx: target.transform.position.x, ty: target.transform.position.y }; SFX.play("warn"); break;
       case "wall": { // 한쪽 벽에서 밀려오는 탄의 벽: 틈을 찾아 피한다
         const side = ["N", "S", "E", "W"][Math.floor(Math.random() * 4)], v = side === "N" || side === "S", len = v ? ARENA.w : ARENA.h, gap = d.gap || 44;
-        this.busy = { type: "wall", d, at, phase: "wind", t: 0.8, side, gap, gc: (Math.random() * 2 - 1) * (len / 2 - TILE - gap), dmg, spd }; SFX.play("warn"); break;
+        this.busy = { type: "wall", d, at, phase: "wind", t: 0.8, side, gap, gc: (Math.random() * 2 - 1) * (len / 2 - 6 - gap), dmg, spd }; SFX.play("warn"); break;
       }
       case "cross": this.busy = { type: "cross", d, at, phase: "wind", t: d.windup, ang: Math.random() * 6, n: Math.min(8, Math.round(d.spokes + (d.countScale ? sc.countAdd : 0))), dmg }; SFX.play("warn"); break;
       case "teleport": this.busy = { type: "teleport", d, at, phase: "vanish", t: 0.35 }; break;
@@ -668,16 +668,16 @@ class Enemy extends Component {
     }
     if (b.type === "rain") { // 위에서 쏟아지는 탄
       const interval = 1 / (d.rate * sc.rate); b.acc += dt;
-      while (b.acc >= interval) { b.acc -= interval; const cl = ARENA.cells[Math.floor(Math.random() * ARENA.cells.length)]; g.spawnProj(cl.x + (Math.random() * 2 - 1) * (ARENA.BASE_W / 2 - TILE - 8), ARENA.h / 2 - TILE - 3, -Math.PI / 2 + (Math.random() - 0.5) * 0.2, b.spd, b.dmg, false); }
+      while (b.acc >= interval) { b.acc -= interval; const cl = ARENA.cells[Math.floor(Math.random() * ARENA.cells.length)]; g.spawnProj(cl.x + (Math.random() * 2 - 1) * (ARENA.BASE_W / 2 - 8), ARENA.h / 2 - 3, -Math.PI / 2 + (Math.random() - 0.5) * 0.2, b.spd, b.dmg, false); }
       if (b.t <= 0) { b.at.cd = d.cd; this.busy = null; }
       return [Math.cos(aim) * this.speed * 0.4, Math.sin(aim) * this.speed * 0.4];
     }
     if (b.type === "wall") { // 탄의 벽: 예고 후 한쪽 벽에서 반대쪽으로 쓸고 간다 (안전한 틈이 있다)
       if (b.phase === "wind") {
         if (b.t <= 0) {
-          const sp = d.spacing || 13, v = b.side === "N" || b.side === "S", len = v ? ARENA.w : ARENA.h, hw = ARENA.w / 2 - TILE - 3, hh = ARENA.h / 2 - TILE - 3, bo = this._bopts(d); // (바깥 테두리 벽 안쪽 가장자리에서 출발)
+          const sp = d.spacing || 13, v = b.side === "N" || b.side === "S", len = v ? ARENA.w : ARENA.h, hw = ARENA.w / 2 - 3, hh = ARENA.h / 2 - 3, bo = this._bopts(d); // (칸 가장자리에서 출발)
           const ang = { N: -Math.PI / 2, S: Math.PI / 2, E: Math.PI, W: 0 }[b.side];
-          for (let u = -len / 2 + TILE + 4; u <= len / 2 - TILE - 4; u += sp) { if (Math.abs(u - b.gc) < b.gap / 2) continue; const x = v ? u : { E: hw, W: -hw }[b.side], y = v ? { N: hh, S: -hh }[b.side] : u; g.spawnProj(x, y, ang, b.spd, b.dmg, false, bo); }
+          for (let u = -len / 2 + 4; u <= len / 2 - 4; u += sp) { if (Math.abs(u - b.gc) < b.gap / 2) continue; const x = v ? u : { E: hw, W: -hw }[b.side], y = v ? { N: hh, S: -hh }[b.side] : u; g.spawnProj(x, y, ang, b.spd, b.dmg, false, bo); }
           g.cam.shake(2, 0.2); SFX.play("boom"); b.at.cd = d.cd; this.busy = null;
         }
       }

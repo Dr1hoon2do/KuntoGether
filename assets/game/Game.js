@@ -255,7 +255,7 @@ class Game extends Component {
     if (dir) this.runStarted = true; // 문으로 나가면 난이도 확정
     this.cur = room; room.visited = true; this.doorHold = 0; this.stairsHold = 0; this.state = "explore";
     applyGeo(room); // 방 모양(1~4칸)과 크기. 카메라 배율은 그대로
-    const hw0 = ARENA.w / 2, hh0 = ARENA.h / 2; this.camFollow.bounds = { minX: -hw0, maxX: hw0, minY: -hh0, maxY: hh0 };
+    const hw0 = ARENA.w / 2 + WALL_BAND, hh0 = ARENA.h / 2 + WALL_BAND; this.camFollow.bounds = { minX: -hw0, maxX: hw0, minY: -hh0, maxY: hh0 }; // 칸 전체 + 바깥 벽 띠까지 보인다
     if (room.obs === null) room.obs = generateObstacles(room, this.floorNum, this._np());
     this.tiles = room.tiles; // 이 방의 타일맵 (부서진 지형은 여기서도 바닥이 된다)
     this._buildWalls();
@@ -264,7 +264,7 @@ class Game extends Component {
     const n = this.heroes.length, side = dir ? OPP[dir] : "S", [dx0, dy0] = doorPos(side);
     this.heroes.forEach((h, i) => { // 들어온 문 앞에 모여서 시작
       const gap = Math.min(20, 150 / Math.max(1, n)), off = (i - (n - 1) / 2) * gap;
-      const [x, y] = side === "S" ? [dx0 + off, dy0 + 44] : side === "N" ? [dx0 + off, dy0 - 44] : side === "W" ? [dx0 + 44, dy0 + off] : [dx0 - 44, dy0 + off]; // 테두리 벽(한 타일) 안쪽에서 시작
+      const [x, y] = side === "S" ? [dx0 + off, dy0 + 26] : side === "N" ? [dx0 + off, dy0 - 26] : side === "W" ? [dx0 + 26, dy0 + off] : [dx0 - 26, dy0 + off]; // 문 앞(한 타일 안쪽)에서 시작
       h.transform.setPosition(x, y); h.invuln = Math.max(h.invuln, 1.2 + h.stats.entryInvuln); h.swing = null; h.echoes = [];
       h.roomT = 0; h.hitThisRoom = false; h.heartBuffOn = false; // 방마다 초기화되는 조건부 효과(양파·낡은 장화·뼈다귀) h.cd = 0; h.kx = h.ky = 0;
       h.shield = Math.max(h.shield, h.stats.roomShield); h.comboN = 0; // 방마다 보호막 채움

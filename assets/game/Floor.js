@@ -4,6 +4,7 @@
 // (2칸 가로/세로, L자 3칸, 2x2 4칸). 카메라는 항상 같은 배율로 플레이어를 따라가므로 큰 방은 "넓어진" 방이 된다.
 // 좌표 원점은 방 전체(바운딩 박스)의 가운데. 방에 들어갈 때 Game.enterRoom이 applyGeo로 채운다.
 const CELL_W = 400, CELL_H = 225;
+const WALL_BAND = 12; // 바깥 벽 두께(반 타일): 걸을 수 있는 칸(16x9 전부) 바깥에 그려지고, 충돌 벽은 칸 가장자리에 있다
 const ARENA = { w: CELL_W, h: CELL_H, BASE_W: CELL_W, BASE_H: CELL_H, ox: 0, oy: 0, cells: [{ x: 0, y: 0, dx: 0, dy: 0 }], voids: [], big: false };
 function roomGeo(room) {
   const cells = room.cells || [[0, 0]];
