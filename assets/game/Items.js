@@ -321,7 +321,7 @@ P("fairy", 3, "🧚", "요정", "따라다니며 방을 3번 클리어할 때마
 // ── 영웅: 분신·조종·릴레이 ──
 P("phantom", 3, "👻", "분신 인형", "내 앞에 분신이 서서 내 공격을 그 자리에서 따라한다 (피해 60%)", ["clone", "dark"], { s: { cloneAhead: 1 } });
 P("ludoorb", 3, "🔮", "조종 구슬", "공격 스틱을 끄는 방향·세기로 구슬이 날아가 닿는 적을 벤다 (스틱을 놓으면 몸 주위를 돈다)", ["ranged", "luck"], { s: { ludo: 1 } });
-P("ludoblade", 3, "🗡️", "유령 검", "공격 스틱을 끄는 대로 움직이는 검 — 닿는 적에게 큰 피해, 적 탄도 쳐낸다", ["melee", "dark"], { s: { ludo: 2 } });
+P("ludoblade", 3, "🗡️", "유령 검", "공격 스틱을 끄는 대로 움직이는 검 — 닿는 적에게 큰 피해", ["melee", "dark"], { s: { ludo: 2 } });
 P("relay", 3, "🏃", "릴레이 배턴", "[파티] 가까운 아군(150 이내)이 내 공격을 자기 자리에서 따라한다 (피해 40%)", ["coop", "clone"], { s: { relay: 1 } });
 
 for (const it of Object.values(PASSIVES)) it.price = ITEM_TIERS[it.tier].price;

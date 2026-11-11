@@ -100,7 +100,6 @@ class Ludo extends Component {
     const q = this.transform.position, blade = this.kind === "blade", now = fxNow(), key = "_lu" + o.id, dmg = (blade ? 2 : 1.3) * o.stats.dmg;
     let m = Physics.overlapCircle(q.x, q.y, blade ? 9 : 7, PL.Enemy, _fb);
     for (let k = 0; k < m; k++) { const e = _fb[k].data; if (e.dead || e.spawnDelay > 0 || now - (e[key] || 0) < 0.25) continue; e[key] = now; const ep = e.transform.position; e.damage(dmg, o, Math.atan2(ep.y - q.y, ep.x - q.x), 80, true); o.applyHitEffects(e, dmg); }
-    if (blade) { m = Physics.overlapCircle(q.x, q.y, 9, PL.EProj, _fb); for (let k = 0; k < m; k++) { const pr = _fb[k].data; if (pr.fromPlayer || pr.gameObject.isDestroyed || pr.orbit) continue; pr.gameObject.destroy(); } }
     m = Physics.overlapCircle(q.x, q.y, 7, PL.Obstacle, _fb); for (let k = 0; k < m; k++) { const ob = _fb[k].data; if (ob.destructible && !ob.dead && fxNow() - (ob._lu || 0) > 0.3) { ob._lu = fxNow(); ob.damage(1, o, !!o.stats.demolish); } }
   }
 }
