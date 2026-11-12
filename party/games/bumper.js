@@ -149,12 +149,12 @@
         dispose() { try { world.destroy(); } catch (e) { console.error(e); } },
         render(h) {
           // 아래쪽 참가자 칩 (탈락은 흐리게)
-          const total = ents.length, x0 = 960 - (total - 1) * 110; ents.forEach((e, i) => { const x = x0 + i * 220; h.g.globalAlpha = e.alive ? 1 : 0.3; h.tag(e.p, x, 1030, { size: 30 }); h.g.globalAlpha = 1; if (!e.alive) h.text("✕", x - 96, 1030, { size: 40, color: "#ff5252", stroke: true }); });
+          const total = ents.length, st = Math.min(220, 1700 / total), x0 = 960 - (total - 1) * st / 2; ents.forEach((e, i) => { const x = x0 + i * st; h.g.globalAlpha = e.alive ? 1 : 0.3; h.tag(e.p, x, 1030, { size: total > 6 ? 26 : 30 }); h.g.globalAlpha = 1; if (!e.alive) h.text("✕", x, 1030, { size: 40, color: "#ff5252", stroke: true, align: "center" }); });
           if (!finished) {
-            const w = warnIdx(); if (w && Math.floor(T * 3) % 2 === 0) h.text("⚠ 바닥이 무너져요!", 960, 140, { size: 64, color: "#ff8a65", stroke: true, strokeW: 8 });
-            if (T >= SUDDEN_T) h.text("서든데스! 바닥이 계속 줄어요", 960, 140, { size: 56, color: "#ff5252", stroke: true, strokeW: 8 });
-          } else if (winner) h.text(`${winner.p.nick} 승리!`, 960, 180, { size: 90, color: winner.color, stroke: true, strokeW: 10 });
-          feed.forEach((f, i) => { const a = f.t < 0.2 ? f.t / 0.2 : Math.max(0, 1 - (f.t - 1.9) / 0.7); h.text(`${f.e.p.nick} 탈락!`, 960, 250 + i * 56, { size: 44, color: f.e.color, stroke: true, strokeW: 7, alpha: a }); });
+            const w = warnIdx(); if (w && Math.floor(T * 3) % 2 === 0) h.text("⚠ 바닥이 무너져요!", 960, 140, { align: "center", size: 64, color: "#ff8a65", stroke: true, strokeW: 8 });
+            if (T >= SUDDEN_T) h.text("서든데스! 바닥이 계속 줄어요", 960, 140, { align: "center", size: 56, color: "#ff5252", stroke: true, strokeW: 8 });
+          } else if (winner) h.text(`${winner.p.nick} 승리!`, 960, 180, { align: "center", size: 90, color: winner.color, stroke: true, strokeW: 10 });
+          feed.forEach((f, i) => { const a = f.t < 0.2 ? f.t / 0.2 : Math.max(0, 1 - (f.t - 1.9) / 0.7); h.text(`${f.e.p.nick} 탈락!`, 960, 250 + i * 56, { align: "center", size: 44, color: f.e.color, stroke: true, strokeW: 7, alpha: a }); });
         },
         // 월드 좌표 그리기 (BumperView가 부른다)
         draw(c) {
