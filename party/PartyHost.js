@@ -70,7 +70,8 @@ class PartyHost {
   _setState(s) { this.state = s; this.stateT = 0; this.net.sendLayout(); this._pushStatus(); }
 
   // ---------- 로비 ----------
-  _modes() { return [{ id: null, name: "무작위" }, ...PartyGames.available(99, this.dev).map(g => ({ id: g.id, name: g.name }))]; }
+  _modes() { return [{ id: null, name: "무작위" }, ...PartyGames.list.filter(g => this.dev || g.id[0] !== "_").map(g => ({ id: g.id, name: g.name }))]; }
+  _canPlay(n) { const sel = this._modes()[this.modeIdx] || this._modes()[0], av = PartyGames.available(n, this.dev); return sel.id ? av.some(g => g.id === sel.id) : av.length > 0; } // 지금 인원으로 시작할 수 있나 (난수 가방을 건드리지 않는다)
   _axisEdge(key, v, th = 0.6) { // 스틱을 한 번 기울일 때마다 한 번만 true (+1/-1)
     const was = this.nav[key] || 0, now = v > th ? 1 : v < -th ? -1 : 0; this.nav[key] = now; return now !== 0 && now !== was ? now : 0;
   }
@@ -82,7 +83,7 @@ class PartyHost {
       if (dy) { this.row = 1 - this.row; PartySfx.play("tick"); }
       if (dx) { const modes = this._modes(); if (this.row === 0) this.modeIdx = (this.modeIdx + dx + modes.length) % modes.length; else this.roundIdx = (this.roundIdx + dx + ROUND_CHOICES.length) % ROUND_CHOICES.length; PartySfx.play("tick"); }
     }
-    const allReady = pl.length > 0 && pl.every(p => p.ready), can = allReady && this._pickGame(pl.length);
+    const allReady = pl.length > 0 && pl.every(p => p.ready), can = allReady && this._canPlay(pl.length);
     if (owner && owner.input.pressed("b")) { if (can) { this._startMatch(); return; } PartySfx.play("hit"); }
     if (can) { if (this.autoStartT < 0) this.autoStartT = 4; this.autoStartT -= dt; if (this.autoStartT <= 0) this._startMatch(); } else this.autoStartT = -1;
   }
@@ -225,7 +226,7 @@ class PartyHost {
     const h = this.hud, g = this.g, pl = this.net.players, owner = this.net.owner;
     h.text("KUNTO PARTY", VW / 2, 90, { size: 120, align: "center", color: "#ffeb3b", strokeW: 18 });
     this._card(VW / 2 - 470, 170, 940, 150, "#fff8");
-    if (this.code) { h.text("방 코드", VW / 2, 215, { size: 36, align: "center", color: "#1a1033", stroke: false }); h.text(this.code.split("").join(" "), VW / 2, 275, { size: 100, align: "center", color: "#5b3df5", strokeW: 0, stroke: false }); }
+    if (this.code) { h.text("방 코드", VW / 2, 205, { size: 36, align: "center", color: "#1a1033", stroke: false }); h.text(this.code.split("").join(" "), VW / 2, 281, { size: 100, align: "center", color: "#5b3df5", strokeW: 0, stroke: false }); }
     else h.text("서버에 연결 중...", VW / 2, 245, { size: 60, align: "center", color: "#1a1033", stroke: false });
     h.text("폰으로 접속해서 방 코드를 입력하세요  ·  PC는 Tab으로 키보드 참가", VW / 2, 360, { size: 34, align: "center" });
     // 플레이어 카드
@@ -281,7 +282,7 @@ class PartyHost {
     order.forEach((ri, slot) => { const p = rank[ri]; if (!p) return; const hh = heights[slot] * Math.min(1, this.stateT / 1.2), bx = xs[slot] - 150, by = 900 - hh;
       h.rect(bx, by, 300, hh, ri === 0 ? "#ffd740" : ri === 1 ? "#cfd8dc" : "#d7a36b", 24); h.text(String(ri + 1), xs[slot], by + hh / 2 + 10, { size: 140, align: "center", color: "#1a1033", stroke: false });
       const bounce = ri === 0 ? Math.abs(Math.sin(this.t * 3)) * 26 : 0; h.circle(xs[slot], by - 90 - bounce, 64, p.color); this.g.strokeStyle = "#1a1033"; this.g.lineWidth = 7; this.g.beginPath(); this.g.arc(xs[slot], by - 90 - bounce, 64, 0, 7); this.g.stroke();
-      if (ri === 0) h.text("🏆", xs[slot], by - 200 - bounce, { size: 100, align: "center", stroke: false }); h.text(p.nick, xs[slot], by - 12, { size: 46, align: "center" }); h.text(`${p.score}점`, xs[slot], by + hh + 40, { size: 44, align: "center" }); });
+      if (ri === 0) h.text("🏆", xs[slot], by - 200 - bounce, { size: 100, align: "center", stroke: false }); h.text(p.nick, xs[slot], by + 44, { size: 44, align: "center" }); h.text(`${p.score}점`, xs[slot], by + hh + 40, { size: 44, align: "center" }); });
     if (rank.length > 3) h.text(rank.slice(3).map((p, i) => `${i + 4}. ${p.nick} ${p.score}점`).join("    "), VW / 2, 1010, { size: 34, align: "center" });
     h.text("방장 [확인]으로 로비로", VW - 40, VH - 30, { size: 30, align: "right", color: "#ffffffcc" });
   }
