@@ -306,3 +306,48 @@ Physics.pointQuery(x, y, r, mask, filter)                     // 가장 가까�
 - 질의 중 피해 처리로 같은 질의가 다시 불릴 수 있으면(연쇄 폭발 등) 결과 배열을 호출마다 새로 만들어 쓴다.
 - `Debug.showColliders = true` + `Debug.enabled`: 충돌 모양을 초록(고정)·노랑(움직임)·하늘(트리거)로 그린다. 게임은 `?debug`로 켠다.
 - 컴포넌트에 `onAttach()` 훅이 생겼다(붙은 직후, 엔진에 올라가기 전에도 호출).
+
+## World2D (강체 물리) — `physics/World2D.js`, `physics/Controllers.js`, `vendor/planck.min.js`
+planck.js(Box2D) 기반. 파티 게임(플랫포머·탑다운·물리 난장판)용이고 던전이 쓰는 `Physics`와는 **별개로 공존**한다. 선택 이유·비교는 `docs/ENGINE_REVIEW.md`, 데모는 `docs/physics-demo.html`.
+- 단위: 월드 단위(Y-up). planck는 미터라서 `world.scale`(기본 32 = 1m)로 변환한다 → 32×32 상자 `density 1` = 질량 1. 속도·힘·중력은 전부 **게임 단위**로 넣고 읽는다.
+- 한 프레임: `GameObject.update`(컨트롤러가 속도 지정) → `World2D.postUpdate`(고정 1/60 스텝 + Transform 보간 동기화) → `lateUpdate`(카메라) → 렌더. Engine에 `postUpdate` 시스템 훅이 생겼다.
+
+```js
+const world = World2D.create(App, { mode: 'platformer', gravity: 1400 });   // mode 'topdown'이면 중력 0, 몸체 기본 감쇠 4
+// opts: gravity(숫자=아래로 N | {x,y}), scale(32), fixedStep(1/60), maxSubsteps(3), velocityIterations(8), positionIterations(3),
+//       interpolate(true), allowSleep(true), adaptive(true: 느린 기기에서 1/30 스텝으로 자동 전환), budgetMs(9), debug(false)
+world.layer('Player');            // 충돌 분류 이름 → 비트 (최대 16, 'Default'=1). world.bits('A'|['A','B']|'all'|숫자)
+world.setGravity(0, -900); world.paused = true; world.debug = true;   // 디버그: 물리 도형 윤곽
+world.step(dt)                    // 고정 스텝을 직접 한 번 (테스트·결정적 재생)
+world.destroy()                   // 씬 전환 때. 이 월드의 몸체는 모두 비활성
+```
+### Body2D (컴포넌트)
+```js
+go.addComponent(new Body2D({ type: 'dynamic'|'static'|'kinematic', shape: 'box', w: 32, h: 32,   // box | circle(radius) | capsule(w,h) | polygon(points) | edge(x1,y1,x2,y2) | chain(points,loop)
+  density: 1, friction: 0.4, restitution: 0, category: 'Player', mask: ['Ground','Item'] /* 'all' */, group: 0, sensor: false,
+  fixedRotation: false, linearDamping, angularDamping, gravityScale: 1, bullet: false /* 빠른 탄은 true */, allowSleep: true,
+  oneWay: true,            // 한쪽 통과 발판(위에서만 밟힘, 'static'/'kinematic' 박스에)
+  drive: 'transform'|'velocity',   // kinematic: Transform을 움직여 구동(기본, 위에 탄 몸체가 같이 실려 감) / body.setVelocity로 구동
+  fixtures: [ { shape, w,h,radius,points, x,y(오프셋), angle, sensor, tag:'foot', density, friction, restitution, category, mask, group, oneWay, color } ],  // 여러 도형
+  preSolve: true, postSolve: true,   // onPreSolve/onPostSolve 콜백을 받으려면
+}));
+// 충돌 분류: 서로 `(A.mask & B.category) && (B.mask & A.category)`일 때만 충돌. 같은 음수 group이면 서로 무시(래그돌).
+```
+- 읽기/쓰기(게임 단위): `x, y`(물리상 위치) · `angle` · `vx, vy`(대입 가능) · `setVelocity(x,y)` · `addVelocity` · `angularVelocity` · `applyForce(fx,fy)`(매 스텝) · `applyImpulse(ix,iy[,atX,atY])` · `applyTorque(t)` · `mass` · `gravityScale` · `linearDamping` · `fixedRotation` · `sleeping/wake()` · `setType(t)` · `setPosition(x,y[,angle])`(순간이동, Transform도 같이) · `syncFromTransform()`(정적 몸체를 코드로 옮겼을 때) · `addFixture(def)` · `getFixture(tag)` · `forEachContact(fn)` · `isTouching(other)`. 도형 크기 `hw, hh`(센서 제외, 반폭/반높이).
+- **Transform ↔ 몸체**: dynamic·velocity-구동 kinematic은 물리가 Transform을 쓴다(보간됨). `transform.setPosition`으로 옮기면 안 되고 `body.setPosition`을 쓴다. 킨메틱 `drive:'transform'`은 반대로 Transform이 기준.
+- **접촉 콜백**: 같은 GameObject의 아무 컴포넌트에 `onBeginContact(info)`·`onEndContact(info)`·`onPreSolve(info)`·`onPostSolve(info)`를 만들면 불린다 (컴포넌트를 나중에 붙였다면 `body.refreshCallbacks()`). `info`는 **공유 객체**(콜백 안에서만 유효): `self, other(Body2D), selfObject, otherObject, selfTag, otherTag, sensor, normalX/Y(self→other), pointX/Y, impulse(postSolve), disable()`(preSolve 안에서 이번 접촉을 끈다). 센서는 막지 않고 begin/end만 낸다. **콜백 안에서 GameObject를 파괴해도 안전**하다(몸체 삭제는 스텝 뒤로 미룸). 생성 옵션 `onBegin/onEnd/onPreSolve/onPostSolve`(함수)로도 받을 수 있다.
+- **질의**(전부 게임 단위, 몸체 `ignore`·레이어 `mask`·`sensors` 지원):
+  `world.raycast(x1,y1,x2,y2, {mask, ignore, sensors})` → 공유 객체 `{hit, body, tag, x,y, nx,ny, fraction, distance}` (가장 가까운 것) · `world.raycastAll(x1,y1,x2,y2, outArray, opts)` → 개수 · `world.queryAABB(minX,minY,maxX,maxY, outArray, mask)` · `world.queryPoint(x,y,outArray,mask)` · `world.overlapCircle(x,y,r,outArray,mask)` → 개수 (outArray = Body2D 목록, 정확한 도형 판정)
+### 조인트 (`Joint2D` 반환: `destroy()`, `setMotor(speed,maxTorque|null)`, `setLimits(lo,hi)`, `setTarget(x,y)`, `setLength(len)`, `angle`)
+`world.revolute(a,b,x,y,{limit:[최소,최대(rad)], motor:{speed,maxTorque}, collide})` · `world.weld(a,b,x,y,{frequency,damping})` · `world.distance(a,b,ax,ay,bx,by,{length,frequency,damping})` · `world.rope(a,b,maxLength[,ax,ay,bx,by])` · `world.prismatic(a,b,x,y,axisX,axisY,{limit:[min,max],motor:{speed,maxForce}})` · `world.wheel(a,b,x,y,axisX,axisY,{frequency,damping,motor})` · `world.mouse(body,x,y,{maxForce})`(잡아끌기, `setTarget`). 몸체는 Body2D(또는 planck 몸체), 점은 월드 좌표. 연결된 두 몸체는 기본적으로 서로 충돌하지 않는다(`collide:true`로 켬). **조인트는 두 몸체가 실제로 만들어진 뒤**(추가한 다음 프레임부터) 걸 것.
+### 컨트롤러 (Body2D와 같은 GameObject에)
+- `PlatformerController({runSpeed:170, accel:1700, decel:2300, airAccel:1100, airDecel:450, jumpSpeed:430, jumpCut:0.45, fallGravity:1.5, maxFall:650, coyote:0.1, buffer:0.12, extraJumps:0, wallSlide:false, wallSlideSpeed:70, wallJump:[230,400]|null, wallLock:0.16, dropThrough:true, dropTime:0.28})` — 매 프레임 `pc.setInput(moveX(-1..1), jumpHeld, downHeld)`. 읽기: `grounded, groundBody, wall(-1/0/1), facing, jumping`. 콜백: `pc.onJump / onLand(낙하속도) / onWallJump`. 몸체는 **가운데 기준 대칭**(캡슐 권장). 마찰은 0, 회전은 고정으로 자동 설정. 이동 발판 위에서는 발판 속도 기준으로 움직인다. `아래 + 점프`로 한쪽 통과 발판 아래로 내려간다.
+- `TopDownController({maxSpeed:150, accel:1600, friction:1900, dashSpeed:380, dashTime:0.14, dashCooldown:0.55})` — `tc.setInput(x,y)`, `tc.dash([dx,dy])`(쿨다운 중이면 false). 읽기: `dashing, facing(rad), moving, dashCd`. 콜백 `tc.onDash`.
+- 컨트롤러 입력은 키보드든 폰 스틱이든 상관없다 — 미니게임이 매 프레임 `setInput`만 부르면 된다.
+### BodyRenderer (프로토타입 그리기)
+`go.addComponent(new BodyRenderer({ fill:'#4fc3f7', stroke:'#1c232b', lineWidth:1, layer:'Default', order:0 }))` — Body2D 도형을 색칠해서 그린다(도형별 `color`가 우선). `flash = 0.1`이면 흰색으로 번쩍인다.
+### 쓰는 순서 / 주의
+1. `Engine` 만든 뒤 `World2D.create(App, …)`로 월드를 하나 만든다(`World2D.current`가 기본 월드). 씬을 바꿀 때는 오브젝트를 지운 뒤 `world.destroy()`하고 새로 만든다.
+2. GameObject에 `Body2D`(+`BodyRenderer`)를 붙인다. 몸체는 `awake`에서 만들어지므로 **붙인 직후 같은 프레임에는 `body.body`가 없다**(`x`/`y`는 Transform 값을 돌려준다).
+3. 성능: 활성 몸체 ~60개까지는 CPU 4배 느림에서도 60fps. 쌓아 둔 몸체는 잠들게 두고(`allowSleep`), 빠른 탄만 `bullet:true`로. 느리면 월드가 자동으로 1/30초 스텝으로 내려간다(`world.degraded`).
+4. planck를 직접 만지고 싶으면 `body.body`(planck Body), `world.world`(planck World). 가능하면 위 래퍼만 쓴다(나중에 다른 엔진으로 바꿀 수 있게).

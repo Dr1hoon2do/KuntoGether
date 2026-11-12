@@ -33,6 +33,9 @@
     'components/ParticleSystem.js',
     'components/SpriteAnimator.js',
     'physics/Physics.js',
+    'vendor/planck.min.js',
+    'physics/World2D.js',
+    'physics/Controllers.js',
   ];
 
   const GAME_BASE = 'assets/';

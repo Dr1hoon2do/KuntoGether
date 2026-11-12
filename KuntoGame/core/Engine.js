@@ -193,6 +193,10 @@ class Engine {
       r._updatePass(dt);
       if (roots[i] !== r) i = GameObject._resync(roots, r, i);
     }
+    // 물리 월드 등: update(컨트롤러가 속도를 정함) 뒤, lateUpdate(카메라 추적)·렌더 앞에서 한 번 (postUpdate 훅이 있는 시스템만)
+    for (const system of this.systems) {
+      if (typeof system.postUpdate === 'function') system.postUpdate(dt);
+    }
     for (let i = 0; i < roots.length; i++) {
       const r = roots[i];
       r._lateUpdatePass(dt);

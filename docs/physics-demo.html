@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KuntoGame World2D 데모</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:sans-serif}
+  #game{display:block;width:100%;height:100%}
+  #hud{position:fixed;left:8px;top:6px;color:#cfd8dc;font-size:12px;line-height:1.5;text-shadow:0 1px 2px #000;pointer-events:none;white-space:pre}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"></div>
+<script src="../kuntogame.js"></script>
+<script>
+// World2D(planck.js) 데모. 플랫포머 씬 ↔ 탑다운 씬 (Tab 키).
+//  플랫포머: P1 = A/D 이동 · W 또는 Space 점프(꾹=높게) · S+점프 = 발판 아래로,  P2 = ←/→ · ↑ 점프 · ↓
+//  탑다운:   P1 = WASD 이동 · Shift 대시,  P2 = 방향키 · Enter 대시
+//  공통: R 다시 시작 · F 물리 도형 표시 · 게임패드가 있으면 1·2번 패드로 조종
+Config.viewWidth = 640; Config.viewHeight = 360; Config.pixelPerfect = false; Config.debug = false; Config.uiScaleMode = 'fit';
+const App = new Engine({ canvas: '#game', clearColor: '#0f141b' });
+const keys = new Set();
+addEventListener('keydown', e => { keys.add(e.code); if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault(); if (e.code === 'Tab') demo.toggle(); if (e.code === 'KeyR') demo.build(demo.scene); if (e.code === 'KeyF') demo.world.debug = !demo.world.debug; });
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+class Mover extends Component { // 킨메틱 발판을 Transform으로 움직인다 (위에 탄 캐릭터가 같이 실려 간다)
+  constructor(x0, y0, ax, ay, speed) { super(); this.x0 = x0; this.y0 = y0; this.ax = ax; this.ay = ay; this.speed = speed; this.t = 0; }
+  update(dt) { this.t += dt * this.speed; this.transform.setPosition(this.x0 + Math.sin(this.t) * this.ax, this.y0 + Math.sin(this.t) * this.ay); }
+}
+class Player extends Component { // 키보드·게임패드 → 컨트롤러 입력
+  constructor(i) { super(); this.i = i; }
+  update() {
+    const i = this.i, gp = (navigator.getGamepads && navigator.getGamepads()[i]) || null, k = c => (keys.has(c) ? 1 : 0);
+    const L = i === 0 ? k('KeyA') : k('ArrowLeft'), R = i === 0 ? k('KeyD') : k('ArrowRight'), U = i === 0 ? k('KeyW') : k('ArrowUp'), D = i === 0 ? k('KeyS') : k('ArrowDown');
+    let mx = R - L, my = U - D, jump = i === 0 ? k('Space') || U : U, dash = i === 0 ? k('ShiftLeft') : k('Enter');
+    if (gp) { const ax = gp.axes[0] || 0, ay = -(gp.axes[1] || 0); if (Math.abs(ax) > 0.2) mx = ax; if (Math.abs(ay) > 0.2) my = ay; jump = jump || (gp.buttons[0] && gp.buttons[0].pressed) ? 1 : 0; dash = dash || (gp.buttons[1] && gp.buttons[1].pressed) ? 1 : 0; }
+    const pc = this.getComponent(PlatformerController), tc = this.getComponent(TopDownController);
+    if (pc) pc.setInput(mx, jump, my < -0.5);
+    if (tc) { tc.setInput(mx, my); if (dash && !this._d) tc.dash(); this._d = dash; }
+  }
+}
+
+const demo = window.demo = { App, scene: 'platformer', world: null, players: [], tower: [], rope: [], ragdoll: null, platforms: {} };
+const clearScene = () => { for (const r of [...App.roots]) if (r.name !== 'camera' && r.name !== 'late') r.destroy(); if (demo.world) demo.world.destroy(); };
+const mk = (name, x, y, body, fill, order = 0) => { const go = App.create(name); go.transform.setPosition(x, y); const b = go.addComponent(new Body2D(body)); go.addComponent(new BodyRenderer({ fill, order })); go.body = b; return go; };
+
+demo.build = function (scene) {
+  clearScene(); demo.scene = scene; demo.players = []; demo.tower = []; demo.rope = []; demo.platforms = {};
+  const top = scene === 'topdown';
+  const w = demo.world = World2D.create(App, { mode: top ? 'topdown' : 'platformer', gravity: top ? 0 : 1400 });
+  w.layer('Player'); w.layer('Item');
+  const wallFill = '#3a4656';
+  if (!top) {
+    mk('ground', 0, -170, { type: 'static', shape: 'box', w: 640, h: 20, friction: 0.8 }, wallFill);
+    mk('ceil', 0, 190, { type: 'static', shape: 'box', w: 640, h: 20 }, wallFill);
+    mk('wallL', -310, 0, { type: 'static', shape: 'box', w: 20, h: 380 }, wallFill);
+    mk('wallR', 310, 0, { type: 'static', shape: 'box', w: 20, h: 380 }, wallFill);
+    demo.platforms.p1 = mk('plat1', -170, -100, { type: 'static', shape: 'box', w: 120, h: 12, oneWay: true }, '#7e57c2');
+    demo.platforms.p2 = mk('plat2', -60, -40, { type: 'static', shape: 'box', w: 120, h: 12, oneWay: true }, '#7e57c2');
+    demo.platforms.p3 = mk('plat3', 70, 10, { type: 'static', shape: 'box', w: 100, h: 12, oneWay: true }, '#7e57c2');
+    demo.platforms.solid = mk('solidBlock', 215, -120, { type: 'static', shape: 'box', w: 60, h: 60 }, wallFill);
+    const mover = mk('mover', 0, -120, { type: 'kinematic', shape: 'box', w: 90, h: 14, friction: 1 }, '#26a69a'); mover.addComponent(new Mover(-30, -120, 130, 0, 1.2)); demo.platforms.mover = mover;
+    // 10단 상자탑 (쌓기 안정성)
+    for (let i = 0; i < 10; i++) demo.tower.push(mk('tower' + i, 264, -150 + 16 + i * 32, { shape: 'box', w: 32, h: 32, density: 1, friction: 0.6 }, i % 2 ? '#ffb74d' : '#ff8a65'));
+    // 밧줄: 천장 고정점 + 상자 사슬 + 끝에 무거운 공
+    const anchor = mk('anchor', -250, 170, { type: 'static', shape: 'circle', radius: 4 }, '#ccc'), links = []; let prev = anchor.body;
+    for (let i = 0; i < 8; i++) { const l = mk('link' + i, -250, 163 - i * 14, { shape: 'box', w: 6, h: 14, density: 0.5, angularDamping: 0.2 }, '#bcaaa4'); links.push(l); demo.rope.push(l); }
+    // 조인트는 몸체가 만들어진 뒤(다음 프레임)에 건다
+    demo.pendingJoints = () => {
+      let a = anchor.body, ay = 170;
+      for (let i = 0; i < links.length; i++) { demo.world.revolute(a, links[i].body, -250, ay); ay -= 14; a = links[i].body; }
+      const ball = mk('ball', -250, ay - 12, { shape: 'circle', radius: 12, density: 2, restitution: 0.3 }, '#ef5350'); demo.ball = ball; demo.rope.push(ball);
+      demo.pending2 = () => demo.world.revolute(a, ball.body, -250, ay);
+    };
+    // 래그돌 (토르소 + 머리 + 팔다리, 한계 있는 회전 관절)
+    const rx = 150, ry = -100, torso = mk('torso', rx, ry, { shape: 'box', w: 16, h: 30, density: 1, group: -1 }, '#4fc3f7');
+    const head = mk('head', rx, ry + 24, { shape: 'circle', radius: 9, density: 0.6, group: -1 }, '#ffe082');
+    const limbDefs = [[-6, -27, 6, 24, -6, -15], [6, -27, 6, 24, 6, -15], [-11, 2, 5, 20, -11, 12], [11, 2, 5, 20, 11, 12]]; // [중심dx, 중심dy, w, h, 관절dx, 관절dy]
+    const limbs = limbDefs.map(([dx, dy, lw, lh], i) => mk('limb' + i, rx + dx, ry + dy, { shape: 'box', w: lw, h: lh, density: 0.6, group: -1 }, '#29b6f6'));
+    demo.ragdoll = { torso, head, limbs };
+    demo.pendingRag = () => {
+      demo.world.revolute(torso.body, head.body, rx, ry + 15, { limit: [-0.5, 0.5] });
+      limbs.forEach((l, i) => { const d = limbDefs[i]; demo.world.revolute(torso.body, l.body, rx + d[4], ry + d[5], { limit: [-1.2, 1.2] }); });
+    };
+    // 상자·공 더미
+    for (let i = 0; i < 14; i++) mk('pile' + i, -40 + (i % 5) * 18, 150 + (i / 5 | 0) * 20, i % 3 === 0 ? { shape: 'circle', radius: 8 + (i % 4), restitution: 0.4 } : { shape: 'box', w: 14 + (i % 3) * 4, h: 14 + (i % 4) * 3, restitution: 0.1 }, ['#aed581', '#81c784', '#fff176', '#f48fb1'][i % 4]);
+    for (let p = 0; p < 2; p++) { const g = mk('P' + (p + 1), -230 + p * 40, -130, { shape: 'capsule', w: 20, h: 34, fixedRotation: true, category: 'Player', density: 1 }, p ? '#f06292' : '#4fc3f7', 5); g.addComponent(new PlatformerController({ wallSlide: false })); g.addComponent(new Player(p)); demo.players.push(g); }
+  } else {
+    const hw = 300, hh = 165;
+    for (const [x, y, ww, hh2] of [[0, -hh - 10, 640, 20], [0, hh + 10, 640, 20], [-hw - 10, 0, 20, 380], [hw + 10, 0, 20, 380]]) mk('wall', x, y, { type: 'static', shape: 'box', w: ww, h: hh2 }, wallFill);
+    for (const [x, y] of [[-100, 40], [100, -40], [0, 0]]) mk('pillar', x, y, { type: 'static', shape: 'circle', radius: 18, restitution: 0.9 }, '#546e7a');
+    for (let i = 0; i < 14; i++) mk('crate' + i, -200 + (i % 7) * 60, 110 - (i / 7 | 0) * 70, { shape: 'box', w: 26, h: 26, density: 1, restitution: 0.1 }, '#a47532');
+    for (let i = 0; i < 5; i++) mk('ball' + i, 160 + i * 18, 80 - i * 28, { shape: 'circle', radius: 11, density: 0.6, restitution: 0.85 }, '#ef5350');
+    for (let p = 0; p < 2; p++) { const g = mk('P' + (p + 1), -200 + p * 60, -100, { shape: 'circle', radius: 12, category: 'Player', density: 2 }, p ? '#f06292' : '#4fc3f7', 5); g.addComponent(new TopDownController({ maxSpeed: 150 })); g.addComponent(new Player(p)); demo.players.push(g); }
+  }
+};
+demo.toggle = () => demo.build(demo.scene === 'platformer' ? 'topdown' : 'platformer');
+// 조인트는 몸체가 실제로 만들어진 다음 프레임에 건다
+class Late extends Component { update() { if (demo.pendingJoints) { const f = demo.pendingJoints; demo.pendingJoints = null; f(); } else if (demo.pending2) { const f = demo.pending2; demo.pending2 = null; f(); if (demo.pendingRag) { const r = demo.pendingRag; demo.pendingRag = null; r(); } } } }
+App.create('late').addComponent(new Late());
+
+demo.build('platformer');
+App.start();
+const hud = document.getElementById('hud');
+setInterval(() => {
+  const w = demo.world; if (!w) return;
+  hud.textContent = `[${demo.scene}] 몸체 ${w.bodies.length} · 조인트 ${w.joints.length} · 물리 ${w.lastStepMs.toFixed(2)}ms · ${Time.fps.toFixed(0)}fps\nTab: 씬 전환 · R: 다시 · F: 물리 도형 표시 · ` + (demo.scene === 'platformer' ? 'P1: A/D W·Space(점프) S+점프(발판 아래로) · P2: ←/→ ↑ ↓' : 'P1: WASD Shift(대시) · P2: 방향키 Enter(대시)');
+}, 250);
+</script>
+</body>
+</html>
