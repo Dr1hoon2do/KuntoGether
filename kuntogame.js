@@ -5116,7 +5116,10 @@ class World2D {
       const fo = ow === fa ? fb : fa, uo = ow === fa ? ub : ua, ob = fo.getBody(), pb = ow.getBody();
       if (uo.oneWay) return; // 발판끼리는 무시
       if (uo.body.dropT > 0) { c.setEnabled(false); return; } // 아래로 내려가는 중
-      const top = ow.getAABB(0).upperBound.y, bottom = fo.getAABB(0).lowerBound.y;
+      // 발바닥 = 몸체 전체(센서 제외 모든 fixture) 중 가장 낮은 점. 캡슐처럼 fixture가 여러 개인 몸체는 가운데 상자만 보면
+      // 점프 꼭대기에서 발이 발판 속에 박힌 채 "위에 선 것"으로 오판해 공중에 걸린다.
+      const top = ow.getAABB(0).upperBound.y; let bottom = fo.getAABB(0).lowerBound.y;
+      for (let f = ob.getFixtureList(); f; f = f.getNext()) { if (f === fo || f.isSensor()) continue; const lb = f.getAABB(0).lowerBound.y; if (lb < bottom) bottom = lb; }
       const rel = ob.getLinearVelocity().y - pb.getLinearVelocity().y;
       const tol = 0.1 + Math.max(0, -rel) * this.fixedStep * 1.5;
       if (bottom < top - tol || rel > 0.5) { c.setEnabled(false); return; }
