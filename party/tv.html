@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KuntoGether Party - TV</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#12082b}
+  canvas{position:absolute;left:0;top:0;width:100%;height:100%;display:block}
+  #ui{pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<canvas id="ui"></canvas>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="../shared/turn.js"></script>
+<script src="../shared/room.js"></script>
+<script src="../kuntogame.js"></script>
+<script src="PartyGames.js"></script>
+<script src="PartySfx.js"></script>
+<script src="PartyNet.js"></script>
+<script src="PartyHost.js"></script>
+<script src="games/_tapRace.js"></script>
+<!-- 새 미니게임은 여기에 한 줄 추가: <script src="games/내게임.js"></script> -->
+<script src="main.js"></script>
+</body>
+</html>

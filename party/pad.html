@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>KuntoGether Party - 컨트롤러</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#12082b;color:#eee;font-family:sans-serif;
+    touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+  #pad{position:fixed;inset:0;width:100%;height:100%;touch-action:none}
+  #msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font-size:20px;background:#000b;pointer-events:none;white-space:pre-line;padding:0 20px}
+  #msg.hide{display:none}
+  #motion{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);font-size:22px;padding:16px 26px;border:0;border-radius:14px;background:#ffd740;color:#1a1033}
+  #motion.hide{display:none}
+  #login{position:fixed;inset:0;background:#12082b;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px;box-sizing:border-box}
+  #login.hide{display:none}
+  #login input{font-size:22px;padding:12px;width:min(320px,90%);box-sizing:border-box;border-radius:10px;border:0;text-align:center}
+  #login button{font-size:20px;padding:12px 24px;width:min(320px,90%);border:0;border-radius:10px;background:#7c4dff;color:#fff}
+  #login small{color:#a99}
+</style>
+</head>
+<body>
+<canvas id="pad"></canvas>
+<button id="motion" class="hide">📱 모션 켜기</button>
+<div id="msg" class="hide"></div>
+<form id="login" class="hide">
+  <div style="font-size:24px">닉네임을 정해 주세요</div>
+  <input id="nick" maxlength="10" placeholder="닉네임 (최대 10글자)" autocomplete="off">
+  <button type="submit">입장</button>
+  <small id="roomInfo"></small>
+</form>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="../shared/turn.js"></script>
+<script src="../shared/room.js"></script>
+<script>
+// 파티 게임 범용 컨트롤러. TV가 보내는 layout({stick, aim, buttons:[{id,label}], color, motion, mode, note})대로 화면을 그린다.
+// 폰을 거의 보지 않고 쓰는 게 전제라서: 버튼은 크고, 스틱은 터치한 자리에서 시작하고, 누르면 진동한다.
+const $ = id => document.getElementById(id);
+const code = normalizeCode(new URLSearchParams(location.search).get("join") || "");
+const msg = t => { $("msg").textContent = t || ""; $("msg").classList.toggle("hide", !t); };
+const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+let pid = store.get("kg.pid");
+if (!pid) { pid = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)); store.set("kg.pid", pid); }
+let nick = store.get("kg.nick") || "";
+
+const cv = $("pad"), g = cv.getContext("2d");
+const touches = new Map();   // id -> { role: "move" | "aim" | "b:<버튼id>", ox, oy, x, y }
+const keys = new Set(), mouse = { down: false, x: 0, y: 0 };
+let layout = { mode: "wait", stick: false, aim: false, buttons: [], color: "#7c4dff", nick: "", note: "" };
+let color = "#7c4dff", status = { ready: false };
+const flash = {};            // 버튼 눌림 연출 { id: 0~1 }
+const R = () => Math.max(40, Math.min(80, Math.min(innerWidth, innerHeight) * 0.13));   // 스틱 반지름
+const BR = () => Math.max(46, Math.min(86, Math.min(innerWidth, innerHeight) * 0.16));  // 버튼 반지름
+// 버튼 위치: 오른쪽 아래 모서리에서 부채꼴로
+function btnPos(i) {
+  const r = BR(), px = innerWidth - r * 1.5, py = innerHeight - r * 1.5, off = [[0, 0], [-2.3, -0.5], [-0.4, -2.3], [-2.6, -2.2]][i] || [0, 0];
+  return { x: px + off[0] * r, y: py + off[1] * r, r };
+}
+const hasRole = r => [...touches.values()].some(t => t.role === r);
+const btnHeld = id => hasRole("b:" + id) || (id === "a" && (keys.has("Space") || keys.has("KeyJ"))) || (id === "b" && keys.has("KeyK")) || (id === "c" && keys.has("KeyL")) || (id === "d" && (keys.has("KeyU") || keys.has("KeyI")));
+function resize() { cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio; g.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0); draw(); }
+addEventListener("resize", resize); addEventListener("orientationchange", () => setTimeout(resize, 200));
+
+function hitButton(x, y) { for (let i = 0; i < layout.buttons.length; i++) { const b = btnPos(i); if (Math.hypot(x - b.x, y - b.y) < b.r * 1.25) return layout.buttons[i]; } return null; }
+function pStart(id, x, y) {
+  const b = hitButton(x, y);
+  if (b) { if (hasRole("b:" + b.id)) return; touches.set(id, { role: "b:" + b.id, ox: x, oy: y, x, y }); flash[b.id] = 1; if (navigator.vibrate) navigator.vibrate(15); return; }
+  let role = null;
+  if (layout.stick && (x < innerWidth * 0.5 || !layout.aim)) role = "move"; else if (layout.aim) role = "aim";
+  if (!role || hasRole(role)) return;
+  touches.set(id, { role, ox: x, oy: y, x, y });
+}
+function pMove(id, x, y) { const t = touches.get(id); if (t) { t.x = x; t.y = y; } }
+function pEnd(id) { touches.delete(id); }
+function reconcile(active) { for (const id of [...touches.keys()]) if (id !== "mouse" && !active.has(id)) touches.delete(id); } // 이미 떼어진 터치(스틱 고정의 원인) 제거
+function clearAll() { touches.clear(); keys.clear(); mouse.down = false; draw(); }
+
+const opt = { passive: false };
+cv.addEventListener("touchstart", e => { e.preventDefault(); lastTouch = Date.now(); for (const t of e.changedTouches) pStart(t.identifier, t.clientX, t.clientY); reconcile(new Set([...e.touches].map(t => t.identifier))); draw(); }, opt);
+cv.addEventListener("touchmove", e => { e.preventDefault(); for (const t of e.changedTouches) pMove(t.identifier, t.clientX, t.clientY); draw(); }, opt);
+const tend = e => { e.preventDefault(); for (const t of e.changedTouches) pEnd(t.identifier); reconcile(new Set([...e.touches].map(t => t.identifier))); draw(); };
+cv.addEventListener("touchend", tend, opt); cv.addEventListener("touchcancel", tend, opt);
+let lastTouch = 0;
+// PC: WASD/방향키 이동 · Space/J = A · K = B · L = C · U = D · 마우스(조준형 게임): 화면 가운데에서 마우스 쪽으로 조준, 가운데 근처는 0 · 버튼은 마우스로 눌러도 됨
+const MOVE_KEYS = { KeyW: [0, 1], KeyS: [0, -1], KeyA: [-1, 0], KeyD: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+const ALL_KEYS = new Set(["Space", "KeyJ", "KeyK", "KeyL", "KeyU", "KeyI"]);
+const typing = e => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+addEventListener("keydown", e => { if (typing(e) || e.metaKey || e.ctrlKey) return; if (MOVE_KEYS[e.code] || ALL_KEYS.has(e.code)) { e.preventDefault(); if (!keys.has(e.code) && ALL_KEYS.has(e.code) && navigator.vibrate) navigator.vibrate(10); keys.add(e.code); draw(); } });
+addEventListener("keyup", e => { keys.delete(e.code); draw(); });
+const kbMove = () => { let x = 0, y = 0; for (const k of keys) { const m = MOVE_KEYS[k]; if (m) { x += m[0]; y += m[1]; } } const l = Math.hypot(x, y); return l ? [x / l, y / l] : null; };
+const mouseAim = () => { const r = Math.min(innerWidth, innerHeight) * 0.3, dx = (mouse.x - innerWidth / 2) / r, dy = -(mouse.y - innerHeight / 2) / r, l = Math.hypot(dx, dy); if (l < 0.35) return [0, 0]; return l > 1 ? [dx / l, dy / l] : [dx, dy]; };
+cv.addEventListener("mousedown", e => {
+  if (Date.now() - lastTouch < 600) return; mouse.x = e.clientX; mouse.y = e.clientY;
+  if (hitButton(e.clientX, e.clientY)) pStart("mouse", e.clientX, e.clientY); else if (layout.aim && e.button === 0) mouse.down = true; draw();
+});
+addEventListener("mousemove", e => { mouse.x = e.clientX; mouse.y = e.clientY; pMove("mouse", e.clientX, e.clientY); if (mouse.down || touches.has("mouse")) draw(); });
+addEventListener("mouseup", () => { mouse.down = false; pEnd("mouse"); draw(); });
+addEventListener("blur", clearAll); addEventListener("pagehide", clearAll);
+document.addEventListener("visibilitychange", () => { clearAll(); if (!document.hidden) ensureConnected(); });
+document.addEventListener("gesturestart", e => e.preventDefault()); document.addEventListener("contextmenu", e => e.preventDefault());
+
+const vec = role => {
+  const t = [...touches.values()].find(t => t.role === role); if (!t) return [0, 0];
+  let dx = (t.x - t.ox) / R(), dy = -(t.y - t.oy) / R(); const l = Math.hypot(dx, dy); if (l > 1) { dx /= l; dy /= l; } // 화면 Y-down → 월드 Y-up
+  return [dx, dy];
+};
+function currentState() {
+  const [mx, my] = kbMove() || vec("move"), [ax, ay] = mouse.down ? mouseAim() : vec("aim"), b = {};
+  for (const x of layout.buttons) b[x.id] = btnHeld(x.id) ? 1 : 0;
+  const out = { t: "s", mx: +mx.toFixed(2), my: +my.toFixed(2), ax: +ax.toFixed(2), ay: +ay.toFixed(2), b };
+  if (motionOn && motion) out.m = motion;
+  return out;
+}
+
+function draw() {
+  const w = innerWidth, h = innerHeight; g.clearRect(0, 0, w, h);
+  const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, "#241254"); gr.addColorStop(1, "#12082b"); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  g.fillStyle = color + "22"; g.fillRect(0, 0, w, 6);
+  g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillStyle = "#fff"; g.font = `bold ${Math.min(42, w / 12)}px sans-serif`; g.fillText(layout.nick || nick, w / 2, Math.min(60, h * 0.14));
+  g.font = `${Math.min(20, w / 28)}px sans-serif`; g.fillStyle = "#cbb8ff";
+  const sub = layout.mode === "game" ? layout.game : layout.mode === "lobby" ? (status.ready ? "준비 완료!" : "준비 버튼을 눌러요") : layout.note || "TV를 보세요";
+  g.fillText(sub || "", w / 2, Math.min(60, h * 0.14) + 34);
+  if (layout.mode === "lobby" && status.ready) { g.fillStyle = "#69f0ae"; g.font = `bold ${Math.min(36, w / 14)}px sans-serif`; g.fillText("✔ READY", w / 2, h * 0.5); }
+  // 스틱: 안 눌렀을 땐 희미한 안내 원
+  if (layout.stick) { const t = [...touches.values()].find(t => t.role === "move"); if (!t) { g.strokeStyle = "#ffffff22"; g.lineWidth = 3; g.beginPath(); g.arc(w * 0.22, h * 0.68, R(), 0, 7); g.stroke(); g.fillStyle = "#ffffff11"; g.beginPath(); g.arc(w * 0.22, h * 0.68, R() * 0.45, 0, 7); g.fill(); } }
+  if (mouse.down) { const [ax, ay] = mouseAim(), r = Math.min(w, h) * 0.3; g.strokeStyle = "#ff8a65"; g.lineWidth = 2; g.beginPath(); g.arc(w / 2, h / 2, r, 0, 7); g.stroke(); g.fillStyle = "#ff8a65aa"; g.beginPath(); g.arc(w / 2 + ax * r, h / 2 - ay * r, 20, 0, 7); g.fill(); }
+  for (const t of touches.values()) if (t.role === "move" || t.role === "aim") {
+    const c = t.role === "aim" ? "#ff8a65" : color, r = R();
+    g.strokeStyle = c; g.lineWidth = 3; g.beginPath(); g.arc(t.ox, t.oy, r, 0, 7); g.stroke();
+    const l = Math.hypot(t.x - t.ox, t.y - t.oy) || 1, m = Math.min(l, r);
+    g.fillStyle = c + "bb"; g.beginPath(); g.arc(t.ox + (t.x - t.ox) / l * m, t.oy + (t.y - t.oy) / l * m, 26, 0, 7); g.fill();
+  }
+  // 버튼
+  layout.buttons.forEach((b, i) => {
+    const p = btnPos(i), on = btnHeld(b.id), f = flash[b.id] || 0, rr = p.r * (on ? 0.94 : 1);
+    g.fillStyle = on ? "#ffd740" : "#ffd74055"; g.beginPath(); g.arc(p.x, p.y, rr, 0, 7); g.fill();
+    if (f > 0) { g.strokeStyle = `rgba(255,255,255,${f})`; g.lineWidth = 6; g.beginPath(); g.arc(p.x, p.y, rr + (1 - f) * 22, 0, 7); g.stroke(); }
+    g.strokeStyle = "#ffd740"; g.lineWidth = 4; g.beginPath(); g.arc(p.x, p.y, rr, 0, 7); g.stroke();
+    g.fillStyle = on ? "#1a1033" : "#fff"; g.font = `bold ${Math.round(p.r * 0.5)}px sans-serif`; g.fillText(b.id.toUpperCase(), p.x, p.y - p.r * 0.12);
+    g.font = `${Math.round(p.r * 0.28)}px sans-serif`; g.fillText(b.label || "", p.x, p.y + p.r * 0.4);
+  });
+}
+setInterval(() => { let dirty = false; for (const k in flash) if (flash[k] > 0) { flash[k] = Math.max(0, flash[k] - 0.1); dirty = true; } if (dirty) draw(); }, 30);
+
+// ---------- 모션 센서 (layout.motion 일 때만, 버튼으로 허가 요청) ----------
+let motionOn = false, motion = null;
+$("motion").addEventListener("click", async () => {
+  try { if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) { const r = await DeviceMotionEvent.requestPermission(); if (r !== "granted") return; } } catch (e) { return; }
+  addEventListener("devicemotion", e => { const a = e.accelerationIncludingGravity || {}, r = e.rotationRate || {}; motion = { ax: +(a.x || 0).toFixed(2), ay: +(a.y || 0).toFixed(2), az: +(a.z || 0).toFixed(2), gx: +(r.alpha || 0).toFixed(1), gy: +(r.beta || 0).toFixed(1), gz: +(r.gamma || 0).toFixed(1) }; });
+  motionOn = true; $("motion").classList.add("hide");
+});
+function applyLayout(L) {
+  const prev = layout; layout = { stick: false, aim: false, buttons: [], motion: false, ...L };
+  if (L.color) color = L.color;
+  const sameBtns = JSON.stringify(prev.buttons) === JSON.stringify(layout.buttons) && prev.stick === layout.stick && prev.aim === layout.aim;
+  if (!sameBtns) { touches.clear(); mouse.down = false; } // 화면 구성이 바뀌면 눌려 있던 것은 놓은 걸로 (스틱 고정 방지)
+  $("motion").classList.toggle("hide", !(layout.motion && !motionOn));
+  draw();
+}
+
+// ---------- 연결 (끊기면 자동 재접속. 같은 pid라서 같은 플레이어로 이어진다) ----------
+let peer = null, conn = null, sendTimer = 0, retryTimer = 0, retries = 0, started = false, connected = false;
+function teardown() { clearInterval(sendTimer); clearTimeout(retryTimer); connected = false; try { conn && conn.close(); } catch (e) {} try { peer && peer.destroy(); } catch (e) {} conn = peer = null; }
+function scheduleRetry(text) {
+  clearTimeout(retryTimer);
+  if (++retries > 12) { msg("방에 연결할 수 없어요.\n(TV 화면이 닫혔거나 방 코드가 바뀌었을 수 있어요)\n처음 화면에서 다시 입력해 주세요."); return; }
+  msg(text + `\n재접속 중... (${retries})`); retryTimer = setTimeout(start, 2500);
+}
+function ensureConnected() { if (started && !connected && retries <= 12 && !retryTimer) start(); }
+async function start() {
+  teardown(); retryTimer = 0; started = true;
+  msg(retries ? `재접속 중... (${retries})` : "서버에 접속 중...");
+  const myPeer = peer = new Peer(undefined, await getPeerOptions());
+  const serverTimer = setTimeout(() => { if (peer === myPeer && !connected) scheduleRetry("서버에 접속하지 못했어요."); }, 10000);
+  myPeer.on("error", e => {
+    if (peer !== myPeer) return; clearTimeout(serverTimer);
+    if (e.type === "peer-unavailable") scheduleRetry("방을 찾을 수 없어요.\n코드를 다시 확인해 주세요.");
+    else if (e.type === "negotiation-failed") scheduleRetry("TV와 연결 경로를 못 찾았어요.");
+    else scheduleRetry("에러: " + e.type);
+  });
+  myPeer.on("open", () => {
+    clearTimeout(serverTimer); if (peer !== myPeer) return;
+    msg("TV를 찾는 중...");
+    const c = conn = myPeer.connect(codeToPeerId(code), { reliable: true, serialization: "json" }); // iOS Safari는 binary 직렬화에서 문제가 있어 json
+    const rtcTimer = setTimeout(() => { if (conn === c && !connected) scheduleRetry("TV와 직접 연결하지 못했어요."); }, 15000);
+    c.on("error", e => { if (conn === c && !connected) scheduleRetry(e.type === "negotiation-failed" ? "TV와 연결 경로를 못 찾았어요." : "연결 에러: " + (e.type || e)); });
+    let last = "", lastAt = 0;
+    c.on("open", () => {
+      clearTimeout(rtcTimer); connected = true; retries = 0; msg("");
+      c.send({ t: "hello", pid, name: nick });
+      sendTimer = setInterval(() => {
+        const out = currentState(), s = JSON.stringify(out), now = Date.now();
+        if (s !== last || now - lastAt > 150) { c.send(out); last = s; lastAt = now; } // 바뀌지 않아도 150ms마다 보내서 TV가 "끊김"을 알아챌 수 있게
+      }, 33);
+    });
+    c.on("data", d => {
+      if (!d) return;
+      if (d.t === "welcome") { color = d.color || color; layout.nick = d.name; draw(); }
+      else if (d.t === "layout") applyLayout(d);
+      else if (d.t === "st") { status = d; draw(); }
+      else if (d.t === "kick") { teardown(); started = false; msg("방에서 나가게 됐어요."); }
+      else if (d.t === "full") { teardown(); started = false; msg("방이 가득 찼어요."); }
+    });
+    c.on("close", () => { if (conn !== c) return; clearInterval(sendTimer); connected = false; touches.clear(); draw(); scheduleRetry("연결이 끊겼어요."); });
+  });
+}
+
+if (!code) msg("방 코드가 없습니다.\n처음 화면에서 입력해 주세요.");
+else {
+  $("login").classList.remove("hide"); $("nick").value = nick; $("roomInfo").textContent = `방 코드 ${code}`;
+  $("login").addEventListener("submit", e => {
+    e.preventDefault();
+    nick = Array.from($("nick").value.replace(/[<>]/g, "").trim()).slice(0, 10).join(""); store.set("kg.nick", nick); $("login").classList.add("hide"); start();
+  });
+}
+window.__pad = { get layout() { return layout; }, get touches() { return touches; }, get connected() { return connected; } }; // 테스트용
+resize();
+</script>
+</body>
+</html>
