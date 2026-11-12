@@ -63,3 +63,4 @@ TV 브라우저를 화면으로, 폰을 컨트롤러로 쓰는 멀티플레이 �
 
 TV 화면에서 `K` 키를 누르면 키보드 1P(WASD 이동, J 공격, L 대시)로 혼자 테스트할 수 있다.
 실행: `python3 -m http.server` 후 `tv.html`을 연다.
+- 파티 테스트: `party/tests/` (Playwright, 가짜 PeerJS). `python3 -m http.server 8123` 후 `PORT=8123 node party/tests/integration.js` — 폰 4대로 미니게임 전부를 끝까지 돌린다.
