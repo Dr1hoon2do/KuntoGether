@@ -58,7 +58,7 @@ const ClimbGen = (() => {
       for (let t = 0; t < tries; t++) {
         const w = Math.round(rng.range(wRange[0], wRange[1]));
         const c = { kind, y, w, r: 0, row: 0 };
-        if (kind === 'move') { c.r = Math.round(rng.range(34, 80)); c.period = rng.range(2.6, 4.2); c.phase = rng.range(0, 6.28); }
+        if (kind === 'move') { c.r = Math.round(rng.range(30, 64)); c.period = rng.range(3.6, 5.4); c.phase = rng.range(0, 6.28); } // 이동 발판 최고 속도 ≈ 2πr/주기 ≤ 112 u/s (사람이 타이밍을 맞출 수 있게)
         // 건너올 후보: 높이 차이가 riseMax 안인 아래 발판들 (최근 것 우선)
         const srcs = from ? [from] : nodes.filter(n => !n.springOnly && y - n.y >= 18 && y - n.y <= P.riseMax - 4);
         if (!srcs.length) return null;
