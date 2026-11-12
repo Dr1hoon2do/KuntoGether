@@ -198,11 +198,11 @@
       h.text(cp.nick, x, y - r - 20, { size: 28, align: "center" });
       if (hold) { // 퓨즈 링(초록→노랑→빨강) + 머리 위 폭탄
         g.lineWidth = 9; g.strokeStyle = `hsl(${Math.round(120 * fr)},95%,58%)`; g.beginPath(); g.arc(x, y, r + 14, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * fr); g.stroke();
-        const pulse = 1 + 0.18 * Math.sin(this.t * (8 + (1 - fr) * 34)), by = y - r - 62; g.save(); g.translate(x, by); g.scale(pulse, pulse);
+        const pulse = 1 + 0.18 * Math.sin(this.t * (8 + (1 - fr) * 34)), by = y - r - 84; g.save(); g.translate(x, by); g.scale(pulse, pulse);
         g.fillStyle = "#222"; g.beginPath(); g.arc(0, 0, 20, 0, 7); g.fill(); g.fillStyle = "#555"; g.beginPath(); g.arc(-6, -6, 7, 0, 7); g.fill();
         g.strokeStyle = "#a1887f"; g.lineWidth = 5; g.beginPath(); g.moveTo(8, -17); g.quadraticCurveTo(14, -30, 24, -28); g.stroke();
         g.fillStyle = Math.sin(this.t * 40) > 0 ? "#ffeb3b" : "#ff6d00"; g.beginPath(); g.arc(25, -29, 6 + 2 * Math.sin(this.t * 30), 0, 7); g.fill(); g.restore();
-        h.text(String(Math.max(0, Math.ceil(p.fuse))), x, by - 38, { size: 34, align: "center", color: fr < 0.35 ? "#ff5252" : "#fff" });
+        h.text(String(Math.max(0, Math.ceil(p.fuse))), x + 42, by + 4, { size: 40, align: "left", color: fr < 0.35 ? "#ff5252" : "#fff" });
       }
     }
     dispose() { try { this.world.destroy(); } catch (e) { console.error(e); } }
