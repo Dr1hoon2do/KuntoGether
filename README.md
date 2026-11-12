@@ -10,6 +10,7 @@ TV 브라우저를 화면으로, 폰을 컨트롤러로 쓰는 멀티플레이 �
 - `party/tv.html` — TV 호스트. 방 코드가 뜨고 폰이 접속하면 로비 → (게임 소개 → 3·2·1 → 미니게임 → 결과) × 라운드 → 시상대. `?dev`(개발용 게임 표시) `?rounds=3|5|7|10` `?seed=N`. PC 시험은 **Tab**으로 키보드 플레이어 추가 (WASD/방향키, Space·J = A, K·Enter = B)
 - `party/pad.html` — 범용 컨트롤러. TV가 보내는 화면 구성(스틱·조준·버튼 최대 4개·모션)대로 그린다. 큰 터치 영역, 버튼 진동, 스틱 고정 방지, 재접속(같은 기기 = 같은 플레이어), PC 키보드·마우스 지원
 - **미니게임 추가**: `party/games/내게임.js`에서 `PartyGames.register({ id, name, rule, view, players, duration, controls, create(ctx) })` → `tv.html`에 `<script>` 한 줄. 입력(`ctx.input`), 시드 난수(`ctx.rng`), 끝내기(`ctx.end`), 장면 자동 정리(`ctx.create`/`ctx.scene`)는 `party/SPEC.md`
+- **미니게임 목록**: `bomb.js` 폭탄 돌리기(탑뷰, 2~8명, 90초 상한, 엔진 `World2D`) — 스틱 이동 · A 돌진, 폭탄을 든 채 터지면 탈락, 닿으면 폭탄이 넘어감(넘긴 사람 0.6초 면역 / 받은 사람 0.35초 락), 폭발 폭풍으로 주변이 날아감, 터질 때마다 벽이 좁혀짐, 짝수 라운드마다 변수(얼음 바닥 / 폭탄 두 개), 순위 = 탈락 역순(동시 탈락은 공동). 수치는 `window.BombCfg`.
 - 로비: 각자 A = 준비, 모두 준비하면 4초 뒤 자동 시작(방장 B로 즉시). 방장 스틱으로 게임(무작위/특정)·라운드 수 선택. 점수는 1등 3 / 2등 2 / 3등 1 (게임별 `points`로 변경, 동점은 높은 쪽 점수)
 - `dungeon/` — 협동 로그라이크 (원래 만들던 게임, 아래 설명은 전부 이 폴더 기준: `dungeon/tv.html`, `dungeon/pad.html`, `dungeon/assets/`)
 - `KuntoGame/`, `kuntogame.js` — 엔진 (모든 게임 공용), `shared/` — 방 코드·TURN (공용), `worker/` — TURN 중계
