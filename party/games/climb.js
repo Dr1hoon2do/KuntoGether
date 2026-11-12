@@ -28,9 +28,7 @@
       this.bodyNode = new Map();
       this._buildTower(); this._buildPlayers();
       const n = 320; this.pt = { n, i: 0, x: new Float32Array(n), y: new Float32Array(n), vx: new Float32Array(n), vy: new Float32Array(n), life: new Float32Array(n), max: new Float32Array(n), size: new Float32Array(n), col: new Array(n).fill("#fff"), grav: new Float32Array(n) };
-      // 배경 별/구름 (시드 고정)
-      this.stars = Array.from({ length: 70 }, () => ({ x: ctx.rng(), y: ctx.rng(), s: ctx.rng.range(1.5, 4), a: ctx.rng.range(0.3, 1) }));
-      this.clouds = Array.from({ length: 14 }, () => ({ x: ctx.rng(), y: ctx.rng(), w: ctx.rng.range(120, 300), a: ctx.rng.range(0.12, 0.3) }));
+      this.view = ctx.create("view"); this.view.addComponent(new ClimbView(this));
       this.cam = { x: 0, y: 130, h: CFG.viewMin }; this.camSnap();
       if (/[?&]dev\b/.test(location.search)) window.__climb = this;
     }
@@ -161,6 +159,12 @@
       y = Math.max(y, h / 2 - 90);
       const a = dt >= 1 ? 1 : 1 - Math.exp(-5 * dt), b = dt >= 1 ? 1 : 1 - Math.exp(-2.5 * dt);
       cam.y = lerp(cam.y, y, a); cam.h = lerp(cam.h, h, b);
+      this.applyCam();
+    }
+    applyCam() { // 엔진 카메라에 반영 (화면 흔들림 포함)
+      const cam = this.cam, sx = this.shake > 0 ? (this.rng() - 0.5) * this.shake * 5 : 0, sy = this.shake > 0 ? (this.rng() - 0.5) * this.shake * 4 : 0;
+      if (Math.abs(cam.h - this._vh) > 0.4 || !this._vh) { this._vh = cam.h; this.ctx.setView(cam.h * 16 / 9, cam.h); }
+      this.ctx.camera.transform.setPosition(cam.x + sx, cam.y + sy);
     }
     // ---------- 파티클 ----------
     puff(x, y, col, n, speed) {
@@ -176,45 +180,42 @@
       S.x[i] = x; S.y[i] = this.lava + 2; S.vx[i] = (this.rng() - 0.5) * 30; S.vy[i] = 50 + this.rng() * 70; S.life[i] = S.max[i] = 0.8 + this.rng() * 0.8; S.size[i] = 1.5 + this.rng() * 2; S.col[i] = this.rng() < 0.5 ? "#ffb300" : "#ff6e40"; S.grav[i] = -10;
     }
     // ---------- 그리기 ----------
-    render(h) {
-      const g = h.g, c = this.cam, k = VH / c.h, lavaY = this.lava, t = this.t, W = VW / k; // W: 화면 가로 월드 폭
-      const sh = this.shake > 0 ? (this.rng() - 0.5) * this.shake * 14 : 0;
-      g.save(); g.translate(sh, sh * 0.6);
-      this._sky(g, c, k);
-      g.save(); g.translate(VW / 2, VH / 2); g.scale(k, -k); g.translate(-c.x, -c.y);
+    // 월드(배경·발판·용암·캐릭터)는 엔진 렌더러(ClimbView)가 엔진 캔버스에 그린다 (브라우저가 확대해 주므로 큰 화면에서도 가볍다). 글자·HUD·용암 붉은 기운만 오버레이에.
+    drawWorld(g) {
+      const c = this.cam, W = c.h * 16 / 9, t = this.t;
+      if (!this.skyGrad) this._bake(g);
       const x0 = c.x - W / 2 - 20, x1 = c.x + W / 2 + 20, y0 = c.y - c.h / 2 - 40, y1 = c.y + c.h / 2 + 40;
       this._tower(g, x0, x1, y0, y1);
       this._platforms(g, y0, y1);
       this._flag(g, t);
-      this._lava(g, x0, x1, y0, lavaY, t);
+      this._lava(g, x0, x1, y0, this.lava, t);
       this._particles(g, y0, y1);
-      g.restore();
-      for (const p of this.P) if (p.alive) this._player(g, p, k);
-      this._lavaGlow(g);
-      g.restore();
-      this._hud(h, k, W);
+      for (const p of this.P) if (p.alive) this._player(g, p);
     }
-    _sky(g, c, k) {
-      const f = clamp(c.y / this.H, 0, 1), top = mix("#2b1559", "#79d8ff", f * f), mid = mix("#7a2f8f", "#d4f3ff", f), bot = mix("#d9548e", "#fff4d0", f);
-      const gr = g.createLinearGradient(0, 0, 0, VH); gr.addColorStop(0, top); gr.addColorStop(0.55, mid); gr.addColorStop(1, bot); g.fillStyle = gr; g.fillRect(-60, -60, VW + 120, VH + 120);
-      g.fillStyle = "#fff"; const sa = clamp(1 - f * 1.6, 0, 1);
-      if (sa > 0) for (const s of this.stars) { g.globalAlpha = s.a * sa * (0.6 + 0.4 * Math.sin(this.t * 2 + s.x * 40)); const sy = (((s.y * 1.4 * VH - c.y * k * 0.12) % VH) + VH) % VH; g.fillRect(s.x * VW, sy, s.s * 1.6, s.s * 1.6); }
-      g.globalAlpha = 1;
-      for (const cl of this.clouds) { const sy = (((cl.y * 1.6 * VH - c.y * k * 0.35) % (VH * 1.4)) + VH * 1.4) % (VH * 1.4) - 150, sx = ((cl.x * (VW + 400) + this.t * 6 * (cl.w / 200)) % (VW + 400)) - 200; g.globalAlpha = cl.a * (0.4 + 0.6 * f); g.fillStyle = "#fff"; g.beginPath(); g.ellipse(sx, sy, cl.w, cl.w * 0.22, 0, 0, 7); g.ellipse(sx + cl.w * 0.35, sy - cl.w * 0.1, cl.w * 0.55, cl.w * 0.2, 0, 0, 7); g.fill(); }
-      g.globalAlpha = 1;
+    render(h) {
+      const c = this.cam, k = VH / c.h, W = VW / k, g = h.g;
+      for (const p of this.P) if (p.alive) this._label(h, p, k);
+      this._lavaGlow(g); this._hud(h, k, W);
     }
-    _tower(g, x0, x1, y0, y1) { // 탑 뒷벽 + 양옆 돌벽
+    // 배경: 탑 안쪽은 "높이에 따라 밤 → 푸른 하늘"로 변하는 세로 그라디언트 한 장(월드 좌표 고정)에 별·구름을 얹는다. 양옆은 돌벽.
+    // (채우기 비용을 아끼려고 전체 화면 그라디언트·큰 반투명 구름은 쓰지 않는다 — 탑 안쪽만 한 번 칠한다.)
+    _bake(g) {
+      const H = this.H, rng = this.rng, T = -250, B = H + 250;
+      const gr = g.createLinearGradient(0, T, 0, B); [[0, "#1c0e3d"], [0.22, "#33268a"], [0.5, "#2a5fc0"], [0.78, "#4fb4e6"], [1, "#c4f2ff"]].forEach(([o, c]) => gr.addColorStop(o, c)); this.skyGrad = gr;
+      this.stars = Array.from({ length: 60 }, () => ({ x: rng.range(-250, 250), y: rng.range(0, H * 0.55), s: rng.range(1.5, 3.5), a: rng.range(0.3, 0.9) }));
+      this.clouds = Array.from({ length: 10 }, () => ({ x: rng.range(-280, 280), y: rng.range(H * 0.25, H * 1.02), w: rng.range(60, 130), a: rng.range(0.16, 0.32) }));
+    }
+    _sky() {}
+    _tower(g, x0, x1, y0, y1) { // 탑 뒷벽(그라디언트 + 별·구름 + 벽돌 선) + 양옆 돌벽
       const half = G.P.W / 2;
-      g.fillStyle = "#1d1233cc"; g.fillRect(-half, y0, G.P.W, y1 - y0);
-      g.strokeStyle = "#ffffff12"; g.lineWidth = 1; g.beginPath();
-      for (let y = Math.floor(y0 / 40) * 40; y < y1; y += 40) { g.moveTo(-half, y); g.lineTo(half, y); }
-      for (let y = Math.floor(y0 / 40) * 40, r = 0; y < y1; y += 40, r++) for (let x = -half + ((y / 40) & 1) * 40; x < half; x += 80) { g.moveTo(x, y); g.lineTo(x, y + 40); }
+      g.fillStyle = this.skyGrad; g.fillRect(-half, y0, G.P.W, y1 - y0);
+      g.fillStyle = "#fff"; for (const st of this.stars) { if (st.y < y0 - 4 || st.y > y1) continue; g.globalAlpha = st.a * (0.6 + 0.4 * Math.sin(this.t * 2 + st.x)); g.fillRect(st.x, st.y, st.s, st.s); }
+      for (const cl of this.clouds) { if (cl.y < y0 - 30 || cl.y > y1 + 30) continue; g.globalAlpha = cl.a; g.beginPath(); g.ellipse(cl.x, cl.y, cl.w, cl.w * 0.22, 0, 0, 7); g.fill(); }
+      g.globalAlpha = 1; g.strokeStyle = "#1d123322"; g.lineWidth = 1.4; g.beginPath();
+      for (let y = Math.floor(y0 / 80) * 80; y < y1; y += 80) { g.moveTo(-half, y); g.lineTo(half, y); g.moveTo(-half, y + 40); g.lineTo(half, y + 40); }
       g.stroke();
-      for (const s of [-1, 1]) { // 돌 기둥
-        const xa = s < 0 ? x0 : half, xb = s < 0 ? -half : x1;
-        g.fillStyle = "#3a2b52"; g.fillRect(xa, y0, xb - xa, y1 - y0); g.fillStyle = "#4b3a6b"; g.fillRect(s < 0 ? -half - 8 : half, y0, 8, y1 - y0);
-        g.strokeStyle = "#2a1d3d"; g.lineWidth = 1.5; g.beginPath(); for (let y = Math.floor(y0 / 48) * 48; y < y1; y += 48) { g.moveTo(xa, y); g.lineTo(xb, y); } g.stroke();
-      }
+      for (const s of [-1, 1]) { const xa = s < 0 ? x0 : half, xb = s < 0 ? -half : x1; g.fillStyle = "#3a2b52"; g.fillRect(xa, y0, xb - xa, y1 - y0); g.fillStyle = "#4b3a6b"; g.fillRect(s < 0 ? -half - 8 : half, y0, 8, y1 - y0); }
+      g.strokeStyle = "#2a1d3d"; g.lineWidth = 1.5; g.beginPath(); for (let y = Math.floor(y0 / 48) * 48; y < y1; y += 48) { g.moveTo(x0, y); g.lineTo(-half - 8, y); g.moveTo(half + 8, y); g.lineTo(x1, y); } g.stroke();
     }
     _platforms(g, y0, y1) {
       for (const n of this.nodes) {
@@ -264,15 +265,14 @@
       const lowest = this.P.reduce((m, p) => (p.alive ? Math.min(m, p.y) : m), 1e9), d = lowest - this.lava; if (!(d < 160)) return;
       const a = clamp(1 - d / 160, 0, 1) * (0.25 + 0.15 * Math.sin(this.t * 8)), gr = g.createLinearGradient(0, VH, 0, VH - 260); gr.addColorStop(0, `rgba(255,60,20,${a})`); gr.addColorStop(1, "rgba(255,60,20,0)"); g.fillStyle = gr; g.fillRect(0, VH - 260, VW, 260);
     }
-    _player(g, p, k) {
-      const c = this.cam, sx = VW / 2 + (p.x - c.x) * k, sy = VH / 2 - (p.y - c.y) * k;
-      if (sy < -120 || sy > VH + 120) return;
-      const col = p.cp.color, S = k * (p.finished ? 1.05 : 1), sqy = p.sqy, sqx = 1 / sqy, hw = 10 * S * sqx, hh = 17 * S * sqy, face = p.face || 1;
-      g.save(); g.translate(sx, sy + (17 * S - hh));
+    _player(g, p) { // 월드 좌표(Y-up)에서 그린다: 캐릭터 기준 좌표는 Y-아래로 뒤집어서 그린다
+      const c = this.cam; if (p.y < c.y - c.h / 2 - 40 || p.y > c.y + c.h / 2 + 40) return;
+      const col = p.cp.color, S = p.finished ? 1.05 : 1, sqy = p.sqy, sqx = 1 / sqy, hw = 10 * S * sqx, hh = 17 * S * sqy, face = p.face || 1;
+      g.save(); g.translate(p.x, p.y - (17 * S - hh)); g.scale(1, -1); g.scale(1, 1);
       g.fillStyle = "#0003"; g.beginPath(); g.ellipse(0, hh + 2, hw * 0.9, hw * 0.28, 0, 0, 7); g.fill();
-      if (p.swing > 0) { g.strokeStyle = "#ffffffcc"; g.lineWidth = 6 * S / 3; g.beginPath(); g.arc(face * hw * 0.6, 0, hw * 2.1, face > 0 ? -0.9 : Math.PI - 0.9 + 1.8 - 1.8, face > 0 ? 0.9 : Math.PI + 0.9); g.stroke(); }
+      if (p.swing > 0) { g.strokeStyle = "#ffffffcc"; g.lineWidth = 2; g.beginPath(); g.arc(face * hw * 0.6, 0, hw * 2.1, face > 0 ? -0.9 : Math.PI - 0.9 + 1.8 - 1.8, face > 0 ? 0.9 : Math.PI + 0.9); g.stroke(); }
       const bodyCol = p.flash > 0 ? "#ffffff" : col;
-      g.fillStyle = bodyCol; g.strokeStyle = "#1c1230"; g.lineWidth = Math.max(2.4, 2 * S / 1.5);
+      g.fillStyle = bodyCol; g.strokeStyle = "#1c1230"; g.lineWidth = 1.4;
       this._rr(g, -hw, -hh, hw * 2, hh * 2, hw); g.fill(); g.stroke();
       g.fillStyle = "#ffffff44"; this._rr(g, -hw * 0.55, -hh * 0.78, hw * 0.45, hh * 0.9, hw * 0.22); g.fill();
       const ex = hw * 0.34, ey = -hh * 0.35, er = hw * 0.34; g.fillStyle = "#fff"; g.beginPath(); g.ellipse(-ex + face * hw * 0.12, ey, er, er * 1.25, 0, 0, 7); g.ellipse(ex + face * hw * 0.12, ey, er, er * 1.25, 0, 0, 7); g.fill();
@@ -281,10 +281,12 @@
       if (p.finished) { g.fillStyle = "#ffeb3b"; g.beginPath(); g.moveTo(-hw * 0.8, -hh - 2); g.lineTo(-hw * 0.8, -hh - hw * 0.9); g.lineTo(-hw * 0.4, -hh - hw * 0.5); g.lineTo(0, -hh - hw * 1.0); g.lineTo(hw * 0.4, -hh - hw * 0.5); g.lineTo(hw * 0.8, -hh - hw * 0.9); g.lineTo(hw * 0.8, -hh - 2); g.closePath(); g.fill(); g.strokeStyle = "#1c1230"; g.lineWidth = 2; g.stroke(); }
       else if (p === this.leader && this.P.length > 1 && !this.ended && p.best > 60) { g.fillStyle = "#ffd54f"; g.beginPath(); g.moveTo(-hw * 0.7, -hh - 4); g.lineTo(-hw * 0.7, -hh - hw * 0.8); g.lineTo(-hw * 0.3, -hh - hw * 0.4); g.lineTo(0, -hh - hw * 0.9); g.lineTo(hw * 0.3, -hh - hw * 0.4); g.lineTo(hw * 0.7, -hh - hw * 0.8); g.lineTo(hw * 0.7, -hh - 4); g.closePath(); g.fill(); g.strokeStyle = "#1c1230"; g.lineWidth = 2; g.stroke(); }
       g.restore();
-      // 닉네임 + 밀치기 쿨타임
-      const ty = sy - hh - 26 * (k / 3), size = Math.round(CFG.tag * clamp(k / 2.6, 0.9, 1.25) * 1.5);
-      this.ctx.hud.text(p.cp.nick, sx, ty - ((p === this.leader && p.best > 60 && this.P.length > 1 && !this.ended) || p.finished ? 28 : 0), { size, align: "center", color: "#fff", strokeW: 6 });
-      if (p.shoveCd > 0) { const w = 54, r = 1 - p.shoveCd / CFG.shoveCd; this.ctx.hud.rect(sx - w / 2, ty + 12, w, 6, "#0008", 3); this.ctx.hud.rect(sx - w / 2, ty + 12, w * r, 6, "#fff", 3); }
+    }
+    _label(h, p, k) { // 닉네임 + 밀치기 쿨타임 (오버레이에 또렷하게)
+      const c = this.cam, sx = VW / 2 + (p.x - c.x) * k, sy = VH / 2 - (p.y - c.y) * k, hh = 17 * k * p.sqy; if (sy < -120 || sy > VH + 120) return;
+      const ty = sy - hh - 26 * (k / 3), size = Math.round(CFG.tag * clamp(k / 2.6, 0.9, 1.25) * 1.5), crown = (p === this.leader && p.best > 60 && this.P.length > 1 && !this.ended) || p.finished;
+      h.text(p.cp.nick, sx, ty - (crown ? 28 : 0), { size, align: "center", color: "#fff", strokeW: 6 });
+      if (p.shoveCd > 0) { const w = 54, r = 1 - p.shoveCd / CFG.shoveCd; h.rect(sx - w / 2, ty + 12, w, 6, "#0008", 3); h.rect(sx - w / 2, ty + 12, w * r, 6, "#fff", 3); }
     }
     _hud(h, k, W) {
       const c = this.cam;
@@ -306,6 +308,12 @@
       // 첫 도착 안내
       if (this.firstFinisher && !this.ended) { const left = Math.max(0, Math.ceil(this.finishAt - this.t)); h.text(`🚩 ${this.firstFinisher.cp.nick} 도착!  ${left}`, VW / 2, 190, { size: 64, align: "center", color: "#ffeb3b", strokeW: 10 }); }
     }
+  }
+
+  class ClimbView extends Renderer { // 월드를 엔진 캔버스에 그리는 렌더러 (엔진 카메라의 viewMatrix 사용)
+    constructor(game) { super(); this.game = game; this.sortingLayer = "Default"; }
+    getBounds() { return null; }
+    render(ctx, camera) { const m = camera.viewMatrix; ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f); this.game.drawWorld(ctx); }
   }
 
   PartyGames.register({

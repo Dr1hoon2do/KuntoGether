@@ -3,7 +3,7 @@
 //
 // 점프 모델 (PlatformerController 기본값과 같다: 중력 1400, 점프 속도 430, 낙하 중력 x1.5, 달리기 170)
 //   올라가는 시간 = v/g, 꼭대기 높이 = v^2/2g (430 → 약 66), 목표가 dy 위에 있으면 꼭대기에서 내려와 dy 높이를 지날 때까지 낙하.
-//   가로 이동 거리 = 달리기 속도 x 전체 비행 시간.  발판 가장자리 사이 간격 ≤ 0.55 x 그 거리 (여유 45%) 이고, 오르는 높이 ≤ 52 (여유 14) 일 때만 "건널 수 있다"고 본다.
+//   가로 이동 거리 = 달리기 속도 x 전체 비행 시간.  발판 가장자리 사이 간격 ≤ 0.6 x 그 거리 (여유 40%) 이고, 오르는 높이 ≤ 52 (여유 14) 일 때만 "건널 수 있다"고 본다.
 // 움직이는 발판은 "가장 가까운 위치"에서 건널 수 있으면 건널 수 있다고 본다 (그 위치를 지날 때까지 기다리면 되므로).
 // 스프링 발판은 점프 속도 660 (꼭대기 ~155)로 더 높은 곳까지 건널 수 있다.
 const ClimbGen = (() => {
@@ -11,7 +11,7 @@ const ClimbGen = (() => {
     g: 1400, fallMul: 1.5, vJump: 430, vSpring: 660, run: 170,
     W: 520,                 // 탑 안쪽 폭 (x: -260..260)
     thick: 12,              // 발판 두께
-    margin: 0.55,           // 가장자리 간격 여유 (실제 비행 거리의 몇 %까지 쓰는지)
+    margin: 0.6,           // 가장자리 간격 여유 (실제 비행 거리의 몇 %까지 쓰는지)
     riseMax: 52, springRiseMax: 130,
   };
   const apex = v => v * v / (2 * P.g);
@@ -39,8 +39,8 @@ const ClimbGen = (() => {
   // 구간(segment) 설정: 아래쪽은 쉽고 넓게, 위로 갈수록 좁고 위험하게.
   const SEG = [
     { name: 'easy', to: 0.2, dy: [34, 44], w: [130, 180], rows: [1, 2], kinds: { normal: 80, spring: 8, ice: 6, crumble: 6 } },
-    { name: 'mid', to: 0.65, dy: [38, 50], w: [90, 130], rows: [1, 2], kinds: { normal: 38, move: 16, crumble: 16, ice: 12, spring: 8 } },
-    { name: 'hard', to: 1, dy: [44, 52], w: [64, 100], rows: [1, 1.4], kinds: { normal: 18, move: 26, crumble: 28, ice: 16, spring: 6 } },
+    { name: 'mid', to: 0.65, dy: [38, 50], w: [90, 130], rows: [1, 2], kinds: { normal: 28, move: 24, crumble: 18, ice: 14, spring: 9 } },
+    { name: 'hard', to: 1, dy: [44, 52], w: [64, 100], rows: [1, 1.4], kinds: { normal: 14, move: 30, crumble: 28, ice: 16, spring: 6 } },
   ];
   const pickKind = (rng, table) => { let t = 0; for (const k in table) t += table[k]; let r = rng() * t; for (const k in table) { if ((r -= table[k]) < 0) return k; } return 'normal'; };
 
