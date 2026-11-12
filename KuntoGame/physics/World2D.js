@@ -18,15 +18,17 @@ class World2D {
   }
 
   // opts: mode 'platformer'|'topdown', gravity(숫자=아래로 N, 또는 {x,y} 단위/s²), scale(기본 32), fixedStep(1/60), maxSubsteps(5),
-  //       velocityIterations(8), positionIterations(3), interpolate(true), allowSleep(true), debug(false)
+  //       velocityIterations(8), positionIterations(3), interpolate(true), allowSleep(true), debug(false),
+  //       adaptive(true): 약한 기기에서 스텝이 너무 오래 걸리면 자동으로 1/30초 스텝으로 낮추고(느려지는 대신 끊기지 않게) 여유가 생기면 되돌린다, budgetMs(9)
   constructor(opts = {}) {
     if (typeof planck === 'undefined') throw new Error('World2D: planck.js가 로드되지 않았다 (kuntogame.js에 포함됨)');
     this.scale = opts.scale ?? 32;
     this.mode = opts.mode || 'platformer';
     this.fixedStep = opts.fixedStep ?? 1 / 60;
-    this.maxSubsteps = opts.maxSubsteps ?? 5;
+    this.maxSubsteps = opts.maxSubsteps ?? 3; // 프레임이 밀려도 한 프레임에 최대 3스텝: 따라잡기 나선(spiral of death) 대신 시뮬레이션이 조금 느려진다
     this.velocityIterations = opts.velocityIterations ?? 8;
     this.positionIterations = opts.positionIterations ?? 3;
+    this.baseStep = this.fixedStep; this.adaptive = opts.adaptive ?? true; this.budgetMs = opts.budgetMs ?? 9; this.degraded = false; this._slow = 0; this._fast = 0; this._ema = 0;
     this.interpolate = opts.interpolate ?? true;
     this.debug = !!opts.debug;
     this.paused = false;
@@ -71,6 +73,16 @@ class World2D {
     this._alpha = this.interpolate ? this._acc / fs : 1;
     this._syncOut(this._alpha);
     this.lastStepMs = performance.now() - t0;
+    if (this.adaptive) this._adapt(n);
+  }
+
+  // 한 프레임의 물리 시간이 예산을 넘는 상태가 이어지면 스텝을 1/30로 낮춘다 (연속 충돌·조인트는 그대로 동작). 여유가 오래 이어지면 1/60으로 복귀.
+  _adapt(n) {
+    if (n === 0) return; // 이번 프레임에 스텝이 없었으면 판단하지 않는다
+    const ms = this.lastStepMs; this._ema += (ms - this._ema) * 0.15;
+    if (!this.degraded) {
+      if (this._ema > this.budgetMs) { if (++this._slow >= 20) { this.degraded = true; this.fixedStep = this.baseStep * 2; this._slow = this._fast = 0; this._acc = 0; } } else this._slow = 0;
+    } else if (this._ema * 2 < this.budgetMs * 0.45) { if (++this._fast >= 300) { this.degraded = false; this.fixedStep = this.baseStep; this._slow = this._fast = 0; this._ema = 0; } } else this._fast = 0;
   }
 
   setGravity(gx, gy) { const s = this.scale; this.world.setGravity(new planck.Vec2(gx / s, gy / s)); return this; }
