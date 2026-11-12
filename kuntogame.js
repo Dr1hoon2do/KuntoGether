@@ -4916,8 +4916,7 @@ class World2D {
     this._stepping = false;
     this.stepCount++; this.time += dt;
     for (let i = 0; i < bs.length; i++) {
-      const b = bs[i], pb = b.body; if (!pb || !b._moves) continue;
-      if (b._kinTransform) continue;
+      const b = bs[i], pb = b.body; if (!pb || !(b._moves || b._kinTransform)) continue; // Transform 구동 킨메틱은 Transform에 쓰지는 않지만 x/y 값은 최신으로 둔다
       const p = pb.getPosition(); b._cx = p.x; b._cy = p.y; b._ca = pb.getAngle();
     }
     if (this._deferred.length) { const d = this._deferred; this._deferred = []; for (let i = 0; i < d.length; i++) d[i](); }
@@ -5279,8 +5278,8 @@ class Body2D extends Component {
   }
 
   // ---- 상태 읽기/쓰기 (전부 게임 단위) ----
-  get x() { return this._cx * this.world.scale; }
-  get y() { return this._cy * this.world.scale; }
+  get x() { return this.world ? this._cx * this.world.scale : this.transform.worldMatrix.e; } // 몸체가 만들어지기 전(첫 프레임)에는 Transform 값
+  get y() { return this.world ? this._cy * this.world.scale : this.transform.worldMatrix.f; }
   get angle() { return this.body.getAngle(); }
   set angle(a) { this.body.setAngle(a); this._ca = a; }
   get vx() { return this.body.getLinearVelocity().x * this.world.scale; }
@@ -5432,7 +5431,9 @@ class PlatformerController extends Component {
     if (vy <= 0) this.jumping = false;
     // 중력 배율/낙하 속도 제한/벽 슬라이드
     B.gravityScale = !this.grounded && vy < 0 ? this.fallGravity : 1;
-    if (this.wallSlide && this.wall !== 0 && vy < 0 && mx === this.wall) vy = Math.max(vy, -this.wallSlideSpeed);
+    if (this.wallSlide && this.wall !== 0 && vy < 0 && mx === this.wall) { // 벽에 붙어 미끄러지는 중: 속도를 제한하고, 제한 속도에 닿으면 중력을 끈다 (스텝 뒤에도 그 속도로 읽히게)
+      vy = Math.max(vy, -this.wallSlideSpeed); B.gravityScale = vy <= -this.wallSlideSpeed + 0.5 ? 0 : 1;
+    }
     if (vy < -this.maxFall) vy = -this.maxFall;
     B.setVelocity(vx, vy);
   }

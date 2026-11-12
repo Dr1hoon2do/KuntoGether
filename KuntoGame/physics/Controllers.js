@@ -75,7 +75,9 @@ class PlatformerController extends Component {
     if (vy <= 0) this.jumping = false;
     // 중력 배율/낙하 속도 제한/벽 슬라이드
     B.gravityScale = !this.grounded && vy < 0 ? this.fallGravity : 1;
-    if (this.wallSlide && this.wall !== 0 && vy < 0 && mx === this.wall) vy = Math.max(vy, -this.wallSlideSpeed);
+    if (this.wallSlide && this.wall !== 0 && vy < 0 && mx === this.wall) { // 벽에 붙어 미끄러지는 중: 속도를 제한하고, 제한 속도에 닿으면 중력을 끈다 (스텝 뒤에도 그 속도로 읽히게)
+      vy = Math.max(vy, -this.wallSlideSpeed); B.gravityScale = vy <= -this.wallSlideSpeed + 0.5 ? 0 : 1;
+    }
     if (vy < -this.maxFall) vy = -this.maxFall;
     B.setVelocity(vx, vy);
   }
