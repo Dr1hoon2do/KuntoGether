@@ -2,7 +2,14 @@
 
 TV 브라우저를 화면으로, 폰을 컨트롤러로 쓰는 멀티플레이 게임. 접속은 PeerJS, 게임 엔진은 [Kortfinite](https://github.com/Dr1hoon2do/Kortfinite)의 `KuntoGame/`을 가져다 쓴다.
 
-- `index.html` — 시작 메뉴 (TV 열기 / 방 코드 입력)
+## 저장소 구조 (게임별 폴더)
+- `index.html` — 게임 허브 (게임을 고르고 TV 열기 / 방 코드로 폰 접속)
+- `party/` — **파티 게임 (미니게임 모음)** — 새로 만드는 중. 폰은 컨트롤러 전용
+- `dungeon/` — 협동 로그라이크 (원래 만들던 게임, 아래 설명은 전부 이 폴더 기준: `dungeon/tv.html`, `dungeon/pad.html`, `dungeon/assets/`)
+- `KuntoGame/`, `kuntogame.js` — 엔진 (모든 게임 공용), `shared/` — 방 코드·TURN (공용), `worker/` — TURN 중계
+
+## 던전 (dungeon/)
+- `dungeon/tv.html`은 위 설명의 `tv.html`, `dungeon/pad.html`은 `pad.html`, `dungeon/assets/`는 `assets/`.
 - `tv.html` — TV 호스트. 5글자 방 코드를 보여 주고 게임을 돌린다 (`?debug`로 FPS 표시, `?res=540|720|1080`으로 렌더 해상도 고정. 기본은 최대 720p로 그리고 프레임이 느리면 자동으로 낮춤)
 - `pad.html` — 폰 컨트롤러. 왼쪽 = 이동, 오른쪽 터치 = 공격(드래그로 방향), 오른쪽 아래 버튼 = 대시
 - 충돌/물리: 엔진의 `Physics`(Collider2D·격자 광역탐색·스윕 이동·부채꼴/캡슐 질의) 위에서 돈다. 벽·지형은 고정 콜라이더, 캐릭터는 원 스윕 이동(미끄러짐·터널링 없음), 탄은 이동 구간을 쓸어 판정, 근접은 그려진 부채꼴·찌르기(굵은 선) 그대로 판정. `tv.html?debug`로 충돌 모양을 볼 수 있다

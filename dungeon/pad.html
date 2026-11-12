@@ -35,8 +35,8 @@
   <small id="roomInfo"></small>
 </form>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<script src="shared/turn.js"></script>
-<script src="shared/room.js"></script>
+<script src="../shared/turn.js"></script>
+<script src="../shared/room.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const code = normalizeCode(new URLSearchParams(location.search).get("join") || "");
