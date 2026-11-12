@@ -121,6 +121,7 @@ class PartyHost {
       players: this.part.map((p, i) => ({ id: p.id, nick: p.nick, color: p.color, index: i, slot: p.index, get connected() { return p.connected; } })),
       time: { elapsed: 0, left: g.duration || Infinity, duration: g.duration || 0 },
       input: id => { const p = host.net.players.find(q => q.id === id); return p ? p.input : NULL_INPUT; },
+      create(name) { const go = App.create(name || "obj"); scene.addChild(go); return go; }, // 이 게임의 오브젝트 만들기 (게임이 끝나면 자동으로 지워진다)
       // 카메라 화면 범위(월드 유닛). 기본 640x360. 위치는 ctx.camera.transform.setPosition(x, y)
       setView(w, h) { App.camera.setBaseView(w, h); App.camera.zoom = 1; },
       // 끝내기: { ranking: [id | [id,id(동점)], ...] 좋은 순 } 또는 { scores: {id: 숫자(클수록 좋음)} } 또는 { winners: [id...] } (협동·팀전: 이긴 사람 모두 1등 점수)

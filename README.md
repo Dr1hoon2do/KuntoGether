@@ -4,7 +4,13 @@ TV 브라우저를 화면으로, 폰을 컨트롤러로 쓰는 멀티플레이 �
 
 ## 저장소 구조 (게임별 폴더)
 - `index.html` — 게임 허브 (게임을 고르고 TV 열기 / 방 코드로 폰 접속)
-- `party/` — **파티 게임 (미니게임 모음)** — 새로 만드는 중. 폰은 컨트롤러 전용
+- `party/` — **파티 게임 (미니게임 모음)**. 폰은 컨트롤러 전용. 셸(로비·소개·결과·최종 순위·접속·입력)은 완성, 미니게임은 `party/games/`에 하나씩 추가 (규약: `party/SPEC.md`)
+
+## 파티 (party/)
+- `party/tv.html` — TV 호스트. 방 코드가 뜨고 폰이 접속하면 로비 → (게임 소개 → 3·2·1 → 미니게임 → 결과) × 라운드 → 시상대. `?dev`(개발용 게임 표시) `?rounds=3|5|7|10` `?seed=N`. PC 시험은 **Tab**으로 키보드 플레이어 추가 (WASD/방향키, Space·J = A, K·Enter = B)
+- `party/pad.html` — 범용 컨트롤러. TV가 보내는 화면 구성(스틱·조준·버튼 최대 4개·모션)대로 그린다. 큰 터치 영역, 버튼 진동, 스틱 고정 방지, 재접속(같은 기기 = 같은 플레이어), PC 키보드·마우스 지원
+- **미니게임 추가**: `party/games/내게임.js`에서 `PartyGames.register({ id, name, rule, view, players, duration, controls, create(ctx) })` → `tv.html`에 `<script>` 한 줄. 입력(`ctx.input`), 시드 난수(`ctx.rng`), 끝내기(`ctx.end`), 장면 자동 정리(`ctx.create`/`ctx.scene`)는 `party/SPEC.md`
+- 로비: 각자 A = 준비, 모두 준비하면 4초 뒤 자동 시작(방장 B로 즉시). 방장 스틱으로 게임(무작위/특정)·라운드 수 선택. 점수는 1등 3 / 2등 2 / 3등 1 (게임별 `points`로 변경, 동점은 높은 쪽 점수)
 - `dungeon/` — 협동 로그라이크 (원래 만들던 게임, 아래 설명은 전부 이 폴더 기준: `dungeon/tv.html`, `dungeon/pad.html`, `dungeon/assets/`)
 - `KuntoGame/`, `kuntogame.js` — 엔진 (모든 게임 공용), `shared/` — 방 코드·TURN (공용), `worker/` — TURN 중계
 
